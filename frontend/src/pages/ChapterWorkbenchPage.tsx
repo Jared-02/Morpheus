@@ -249,6 +249,12 @@ export default function ChapterWorkbenchPage() {
     const [chapter, setChapter] = useState<Chapter | null>(null)
     const [loading, setLoading] = useState(true)
     const [draftContent, setDraftContent] = useState('')
+    const [streamChannel, setStreamChannel] = useState<'arbiter' | 'director' | 'setter' | 'stylist'>('arbiter')
+    const [streamChannelText, setStreamChannelText] = useState({
+        director: '',
+        setter: '',
+        stylist: '',
+    })
     const [oneShotPrompt, setOneShotPrompt] = useState('')
     const [oneShotMode, setOneShotMode] = useState<OneShotMode>('studio')
     const [oneShotWords, setOneShotWords] = useState(1600)
@@ -284,6 +290,14 @@ export default function ChapterWorkbenchPage() {
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
     const [showClearWorkspaceConfirm, setShowClearWorkspaceConfirm] = useState(false)
     const [deletingChapter, setDeletingChapter] = useState(false)
+
+    const activeStreamText = streamChannel === 'arbiter'
+        ? draftContent
+        : streamChannelText[streamChannel]
+    const canEditDraft = streamChannel === 'arbiter'
+    const emptyStreamText = streamChannel === 'arbiter'
+        ? '点击"流式生成草稿"开始创作。'
+        : '等待该阶段输出...'
 
     /* ── 加载章节 ── */
     const loadChapter = useCallback(async () => {
@@ -539,6 +553,8 @@ export default function ChapterWorkbenchPage() {
     const startDraftStream = (force: boolean, resume: boolean) => {
         if (!chapterId) return
         setStreaming(true)
+        setStreamChannel('arbiter')
+        setStreamChannelText({ director: '', setter: '', stylist: '' })
         const startOffset = resume ? draftContent.length : 0
         if (!resume) setDraftContent('')
 
@@ -552,8 +568,33 @@ export default function ChapterWorkbenchPage() {
         eventSourceRef.current = source
 
         source.addEventListener('chunk', (event) => {
-            const payload = JSON.parse((event as MessageEvent).data) as { chunk: string }
-            setDraftContent((prev) => prev + payload.chunk)
+            const payload = JSON.parse((event as MessageEvent).data) as { chunk: string; channel?: string }
+            const channel = payload.channel || 'arbiter'
+            if (channel === 'arbiter') {
+                setDraftContent((prev) => prev + payload.chunk)
+                return
+            }
+            if (channel === 'director' || channel === 'setter' || channel === 'stylist') {
+                setStreamChannelText((prev) => ({
+                    ...prev,
+                    [channel]: `${prev[channel]}${payload.chunk}`,
+                }))
+            }
+        })
+
+        source.addEventListener('error', (event) => {
+            const payload = JSON.parse((event as MessageEvent).data) as { detail?: string }
+            source.close()
+            setStreaming(false)
+            addToast('error', '流式生成失败', {
+                context: '流式生成',
+                actions: [
+                    { label: '继续生成', onClick: () => startDraftStream(false, true) },
+                    { label: '重新开始', onClick: () => startDraftStream(true, false) },
+                ],
+                detail: payload?.detail || '流式生成失败',
+            })
+            addRecord({ type: 'generate', description: '流式生成失败', status: 'error', retryAction: () => startDraftStream(false, true) })
         })
 
         source.addEventListener('done', async (event) => {
@@ -1444,8 +1485,37 @@ export default function ChapterWorkbenchPage() {
                             )}
                         </div>
 
+                        <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                            <span className="metric-label">流式通道</span>
+                            <button
+                                className={streamChannel === 'arbiter' ? 'btn btn-primary' : 'btn btn-secondary'}
+                                onClick={() => setStreamChannel('arbiter')}
+                                disabled={streaming && streamChannel !== 'arbiter' && draftContent.length === 0}
+                            >
+                                终稿
+                            </button>
+                            <button
+                                className={streamChannel === 'director' ? 'btn btn-primary' : 'btn btn-secondary'}
+                                onClick={() => setStreamChannel('director')}
+                            >
+                                导演
+                            </button>
+                            <button
+                                className={streamChannel === 'setter' ? 'btn btn-primary' : 'btn btn-secondary'}
+                                onClick={() => setStreamChannel('setter')}
+                            >
+                                设定
+                            </button>
+                            <button
+                                className={streamChannel === 'stylist' ? 'btn btn-primary' : 'btn btn-secondary'}
+                                onClick={() => setStreamChannel('stylist')}
+                            >
+                                润色
+                            </button>
+                        </div>
+
                         <div style={{ marginTop: 12 }}>
-                            {editing ? (
+                            {editing && canEditDraft ? (
                                 <textarea
                                     className="textarea"
                                     rows={22}
@@ -1463,7 +1533,7 @@ export default function ChapterWorkbenchPage() {
                                         overflow: 'auto',
                                     }}
                                 >
-                                    {draftContent || '点击"流式生成草稿"开始创作。'}
+                                    {activeStreamText || emptyStreamText}
                                 </div>
                             )}
                         </div>
