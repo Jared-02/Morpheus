@@ -4449,42 +4449,319 @@ async def _generate_draft_internal(chapter_id: str, force: bool = False) -> Dict
     )
 
 
+async def _generate_draft_internal_stream(
+    chapter_id: str,
+    *,
+    stream_chunk: Callable[[str, str], Any],
+    progress: ProgressReporter,
+    force: bool = False,
+) -> Dict[str, Any]:
+    chapter = resolve_chapter(chapter_id)
+    if not chapter:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+    project = resolve_project(chapter.project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    logger.info(
+        "draft stream generation start chapter_id=%s project_id=%s chapter_no=%d force=%s",
+        chapter.id,
+        chapter.project_id,
+        chapter.chapter_number,
+        force,
+    )
+
+    started = datetime.now()
+    store = get_or_create_store(chapter.project_id)
+    studio = get_or_create_studio(chapter.project_id)
+    store.sync_file_memories()
+    store.three_layer.add_log(f"开始流式生成章节 {chapter.chapter_number} 草稿")
+
+    if not chapter.plan:
+        await emit_progress(
+            progress,
+            "stage",
+            {"stage": "plan_start", "chapter_id": chapter.id, "chapter_number": chapter.chapter_number},
+        )
+        workflow_for_plan = StudioWorkflow(
+            studio, lambda query, **kwargs: store.search_fts(query, kwargs.get("fts_top_k", 20))
+        )
+        mem_ctx_plan = MemoryContextService(store.three_layer, store)
+        plan_project_chapters = [
+            {"chapter_number": c.chapter_number, "plan": c.plan, "draft": c.draft, "final": c.final}
+            for c in chapter_list(chapter.project_id)
+        ]
+        plan_context_pack = mem_ctx_plan.build_generation_context_pack(
+            chapter.chapter_number, plan_project_chapters
+        )
+        try:
+            chapter.plan = await workflow_for_plan.generate_plan(
+                chapter,
+                {
+                    "project_info": project.model_dump(mode="json"),
+                    "previous_chapters": [
+                        c.model_dump(mode="json")
+                        for c in chapter_list(chapter.project_id)
+                        if c.chapter_number < chapter.chapter_number
+                    ],
+                    "context_pack": plan_context_pack,
+                },
+            )
+        except RuntimeError as exc:
+            logger.warning(
+                "draft stream pre-plan generation failed chapter_id=%s chapter_no=%d detail=%s",
+                chapter.id,
+                chapter.chapter_number,
+                exc,
+            )
+            raise HTTPException(status_code=503, detail=str(exc))
+        quality_payload = workflow_for_plan.get_last_plan_quality()
+        quality_debug = workflow_for_plan.get_last_plan_debug()
+        chapter.plan_quality = (
+            PlanQualityReport.model_validate(quality_payload) if quality_payload else None
+        )
+        chapter.plan_quality_debug = quality_debug or None
+        await emit_progress(
+            progress,
+            "stage",
+            {
+                "stage": "plan_done",
+                "chapter_id": chapter.id,
+                "chapter_number": chapter.chapter_number,
+                "plan_quality": chapter.plan_quality.model_dump(mode="json")
+                if chapter.plan_quality
+                else None,
+            },
+        )
+
+    workflow = StudioWorkflow(
+        studio, lambda query, **kwargs: store.search_fts(query, kwargs.get("fts_top_k", 20))
+    )
+    trace = studio.start_trace(chapter.chapter_number)
+    target_words = resolve_project_target_words(project, chapter.project_id)
+
+    memory_ctx_svc = MemoryContextService(
+        three_layer=store.three_layer,
+        memory_store=store,
+        context_window_tokens=resolve_context_window_tokens(studio.llm_client),
+    )
+    project_chapters = [
+        c.model_dump(mode="json")
+        for c in chapter_list(chapter.project_id)
+        if c.chapter_number < chapter.chapter_number
+    ]
+    context_pack = memory_ctx_svc.build_generation_context_pack(
+        chapter.chapter_number, project_chapters
+    )
+
+    await emit_progress(
+        progress,
+        "stage",
+        {"stage": "draft_start", "chapter_id": chapter.id, "chapter_number": chapter.chapter_number},
+    )
+    draft = await workflow.generate_draft_stream(
+        chapter,
+        chapter.plan,
+        {
+            "identity": context_pack.get("identity_core") or store.three_layer.get_identity(),
+            "runtime_state": context_pack.get("runtime_state", ""),
+            "memory_compact": context_pack.get("memory_compact", ""),
+            "previous_chapter_synopsis": context_pack.get("previous_chapter_synopsis", ""),
+            "open_threads": context_pack.get("open_threads", []),
+            "project_style": project.style,
+            "target_words": target_words,
+            "previous_chapters": context_pack.get("previous_chapters_compact")
+            or [
+                c.final or c.draft or ""
+                for c in chapter_list(chapter.project_id)
+                if c.chapter_number < chapter.chapter_number
+            ][-5:],
+        },
+        on_stage_chunk=stream_chunk,
+    )
+    await emit_progress(
+        progress,
+        "stage",
+        {"stage": "draft_done", "chapter_id": chapter.id, "chapter_number": chapter.chapter_number},
+    )
+
+    draft = await rebalance_draft_length_if_needed(
+        llm_client=studio.llm_client,
+        chapter=chapter,
+        project=project,
+        draft=draft,
+        target_words=target_words,
+    )
+    await emit_progress(
+        progress,
+        "stage",
+        {
+            "stage": "consistency_start",
+            "chapter_id": chapter.id,
+            "chapter_number": chapter.chapter_number,
+        },
+    )
+    result = finalize_generated_draft(
+        chapter=chapter,
+        project=project,
+        store=store,
+        studio=studio,
+        trace=trace,
+        draft=draft,
+        started=started,
+        source_label="草稿生成",
+    )
+    await emit_progress(
+        progress,
+        "stage",
+        {
+            "stage": "finalize_done",
+            "chapter_id": chapter.id,
+            "chapter_number": chapter.chapter_number,
+        },
+    )
+    return result
+
+
 @app.get("/api/chapters/{chapter_id}/draft/stream")
 async def stream_draft(chapter_id: str, force: bool = False, resume_from: int = 0):
-    result = await _generate_draft_internal(chapter_id, force=force)
     chapter = resolve_chapter(chapter_id)
-    if not chapter or not chapter.draft:
-        raise HTTPException(status_code=404, detail="Draft not found")
+    if not chapter:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+    project = resolve_project(chapter.project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
 
-    draft_text = chapter.draft
-    start = max(0, min(resume_from, len(draft_text)))
-    chunk_size = 220
+    queue: asyncio.Queue[tuple[str, Dict[str, Any]]] = asyncio.Queue()
+
+    async def report(event: str, payload: Dict[str, Any]):
+        await queue.put((event, payload))
+
+    async def worker():
+        try:
+            if chapter.draft and not force:
+                result = await _generate_draft_internal(chapter_id, force=False)
+                draft_text = chapter.draft or ""
+                start = max(0, min(resume_from, len(draft_text)))
+                await report(
+                    "meta",
+                    {
+                        "chapter_id": chapter_id,
+                        "chapter_number": chapter.chapter_number,
+                        "title": chapter.title,
+                        "word_count": chapter.word_count,
+                        "start": start,
+                        "cached": True,
+                    },
+                )
+                cursor = start
+                while cursor < len(draft_text):
+                    next_cursor = min(cursor + 800, len(draft_text))
+                    chunk = draft_text[cursor:next_cursor]
+                    await report(
+                        "chunk",
+                        {
+                            "chapter_id": chapter_id,
+                            "chapter_number": chapter.chapter_number,
+                            "offset": next_cursor,
+                            "chunk": chunk,
+                            "channel": "arbiter",
+                            "done": False,
+                        },
+                    )
+                    cursor = next_cursor
+                    await asyncio.sleep(0)
+                await report(
+                    "done",
+                    {
+                        "offset": len(draft_text),
+                        "done": True,
+                        "consistency": result.get("consistency", {}),
+                        "can_submit": result.get("can_submit", True),
+                        "cached": True,
+                    },
+                )
+                return
+
+            await report(
+                "meta",
+                {
+                    "chapter_id": chapter_id,
+                    "chapter_number": chapter.chapter_number,
+                    "title": chapter.title,
+                    "word_count": chapter.word_count,
+                    "start": 0,
+                    "cached": False,
+                },
+            )
+            offsets: Dict[str, int] = {}
+
+            async def stream_chunk(text: str, channel: str):
+                if not text:
+                    return
+                cursor = offsets.get(channel, 0) + len(text)
+                offsets[channel] = cursor
+                await report(
+                    "chunk",
+                    {
+                        "chapter_id": chapter_id,
+                        "chapter_number": chapter.chapter_number,
+                        "offset": cursor,
+                        "chunk": text,
+                        "channel": channel,
+                        "done": False,
+                    },
+                )
+
+            result = await _generate_draft_internal_stream(
+                chapter_id,
+                stream_chunk=stream_chunk,
+                progress=report,
+                force=force,
+            )
+            await report(
+                "done",
+                {
+                    "offset": offsets.get("arbiter", 0),
+                    "done": True,
+                    "consistency": result.get("consistency", {}),
+                    "can_submit": result.get("can_submit", True),
+                    "cached": False,
+                },
+            )
+        except Exception as exc:
+            logger.exception("draft stream failed chapter_id=%s", chapter_id)
+            await report("error", {"detail": str(exc)})
+        finally:
+            await report("__end__", {})
+
+    worker_task = asyncio.create_task(worker())
 
     async def event_stream():
-        meta = {
-            "chapter_id": chapter_id,
-            "word_count": chapter.word_count,
-            "start": start,
-            "can_submit": result.get("can_submit", True),
-        }
-        yield f"event: meta\ndata: {json.dumps(meta, ensure_ascii=False)}\n\n"
+        heartbeat = 0
+        try:
+            while True:
+                try:
+                    event, payload = await asyncio.wait_for(queue.get(), timeout=2.0)
+                except asyncio.TimeoutError:
+                    heartbeat += 1
+                    heartbeat_payload = {
+                        "seq": heartbeat,
+                        "timestamp": datetime.now().isoformat(),
+                    }
+                    yield f"event: heartbeat\ndata: {json.dumps(heartbeat_payload, ensure_ascii=False)}\n\n"
+                    continue
 
-        cursor = start
-        while cursor < len(draft_text):
-            next_cursor = min(cursor + chunk_size, len(draft_text))
-            chunk = draft_text[cursor:next_cursor]
-            payload = {"offset": next_cursor, "chunk": chunk, "done": False}
-            yield f"event: chunk\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
-            cursor = next_cursor
-            await asyncio.sleep(0.01)
-
-        done = {
-            "offset": len(draft_text),
-            "done": True,
-            "consistency": result.get("consistency", {}),
-            "can_submit": result.get("can_submit", True),
-        }
-        yield f"event: done\ndata: {json.dumps(done, ensure_ascii=False)}\n\n"
+                if event == "__end__":
+                    break
+                yield f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+        finally:
+            if not worker_task.done():
+                worker_task.cancel()
+                try:
+                    await worker_task
+                except asyncio.CancelledError:
+                    pass
 
     return StreamingResponse(
         event_stream(),
