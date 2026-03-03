@@ -488,6 +488,40 @@ describe('ChapterWorkbenchPage', () => {
         })
     })
 
+    it('加载后会从 trace 回填流式侧通道', async () => {
+        mockApiGet.mockImplementation((url: string) => {
+            if (url === '/chapters/ch-1') {
+                return Promise.resolve({ data: sampleChapter })
+            }
+            if (url === '/trace/ch-1') {
+                return Promise.resolve({
+                    data: {
+                        channel_snapshot: {
+                            director: '导演阶段内容',
+                            setter: '设定阶段内容',
+                            stylist: '润色阶段内容',
+                        },
+                    },
+                })
+            }
+            return Promise.resolve({ data: sampleChapter })
+        })
+
+        renderPage()
+        await waitFor(() => {
+            expect(mockApiGet).toHaveBeenCalledWith('/trace/ch-1')
+        })
+
+        fireEvent.click(screen.getByText('导演'))
+        expect(await screen.findByText('导演阶段内容')).toBeTruthy()
+
+        fireEvent.click(screen.getByText('设定'))
+        expect(await screen.findByText('设定阶段内容')).toBeTruthy()
+
+        fireEvent.click(screen.getByText('润色'))
+        expect(await screen.findByText('润色阶段内容')).toBeTruthy()
+    })
+
     it('显示字数统计', async () => {
         renderPage()
         await waitFor(() => {
@@ -575,7 +609,25 @@ describe('ChapterWorkbenchPage', () => {
         expect(screen.getByText('保存编辑并重检')).toBeTruthy()
     })
 
-    it('清空创作台仅清空本地编辑区，不触发保存接口', async () => {
+    it('清空创作台会清空终稿与侧通道，且不触发保存接口', async () => {
+        mockApiGet.mockImplementation((url: string) => {
+            if (url === '/chapters/ch-1') {
+                return Promise.resolve({ data: sampleChapter })
+            }
+            if (url === '/trace/ch-1') {
+                return Promise.resolve({
+                    data: {
+                        channel_snapshot: {
+                            director: '导演阶段待办',
+                            setter: '设定阶段校验',
+                            stylist: '润色阶段建议',
+                        },
+                    },
+                })
+            }
+            return Promise.resolve({ data: sampleChapter })
+        })
+
         renderPage()
         await waitFor(() => {
             expect(screen.getByText('清空创作台')).toBeTruthy()
@@ -586,13 +638,80 @@ describe('ChapterWorkbenchPage', () => {
         fireEvent.change(editor, { target: { value: '临时编辑内容' } })
         expect(editor.value).toBe('临时编辑内容')
 
+        fireEvent.click(screen.getByText('导演'))
+        expect(await screen.findByText('导演阶段待办')).toBeTruthy()
+
         fireEvent.click(screen.getByText('清空创作台'))
         expect(screen.getByText('清空当前创作台？')).toBeTruthy()
         fireEvent.click(screen.getByText('确认清空'))
 
         const clearedEditor = document.querySelector('textarea[rows="22"]') as HTMLTextAreaElement
         expect(clearedEditor.value).toBe('')
+
+        fireEvent.click(screen.getByText('导演'))
+        expect(await screen.findByText('等待该阶段输出...')).toBeTruthy()
+        expect(screen.queryByText('导演阶段待办')).toBeNull()
+
         expect(mockApiPut).not.toHaveBeenCalled()
+    })
+
+    it('流式生成完成后会清理本地草稿，避免弹出恢复对话框', async () => {
+        const originalEventSource = (globalThis as any).EventSource
+        const sources: any[] = []
+
+        class MockEventSource {
+            onerror: any = null
+            private listeners = new Map<string, Array<(event: MessageEvent) => void>>()
+
+            constructor(_url: string) {
+                sources.push(this)
+            }
+
+            addEventListener(type: string, listener: (event: MessageEvent) => void) {
+                const list = this.listeners.get(type) || []
+                list.push(listener)
+                this.listeners.set(type, list)
+            }
+
+            close() {
+                return undefined
+            }
+
+            emit(type: string, payload: unknown) {
+                const list = this.listeners.get(type) || []
+                const event = { data: JSON.stringify(payload) } as MessageEvent
+                for (const listener of list) {
+                    listener(event)
+                }
+            }
+        }
+
+        (globalThis as any).EventSource = MockEventSource as any
+
+        try {
+            renderPage()
+            await waitFor(() => {
+                expect(screen.getByText('流式生成草稿')).toBeTruthy()
+            })
+
+            localStorageMock.removeItem.mockClear()
+
+            fireEvent.click(screen.getByText('流式生成草稿'))
+            expect(sources.length).toBeGreaterThan(0)
+
+            const source = sources[0]
+            source.emit('chunk', { channel: 'arbiter', chunk: '流式正文片段' })
+            source.emit('done', { consistency: { can_submit: true, conflicts: [] } })
+
+            await waitFor(() => {
+                expect(mockAddToast).toHaveBeenCalledWith('success', '草稿生成完成')
+            })
+
+            expect(localStorageMock.removeItem).toHaveBeenCalledWith('draft-ch-1')
+            expect(screen.queryByText('发现本地草稿')).toBeNull()
+        } finally {
+            (globalThis as any).EventSource = originalEventSource
+        }
     })
 
     it('保存草稿成功时触发 success Toast', async () => {

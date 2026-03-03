@@ -621,7 +621,8 @@ class StudioWorkflow:
         chapter: Chapter,
         plan: ChapterPlan,
         context: Dict[str, Any],
-        on_chunk: Callable[[str], Any],
+        on_chunk: Optional[Callable[[str], Any]] = None,
+        on_stage_chunk: Optional[Callable[[str, str], Any]] = None,
     ) -> str:
         director = self.studio.get_agent(AgentRole.DIRECTOR)
         setter = self.studio.get_agent(AgentRole.SETTER)
@@ -655,9 +656,27 @@ class StudioWorkflow:
             "rhythm_hint": rhythm_hint,
         }
 
+        async def emit_stage_chunk(channel: str, text: str):
+            if not text:
+                return
+            if on_stage_chunk:
+                maybe = on_stage_chunk(text, channel)
+                if inspect.isawaitable(maybe):
+                    await maybe
+                return
+            if on_chunk and channel == "arbiter":
+                maybe = on_chunk(text)
+                if inspect.isawaitable(maybe):
+                    await maybe
+
+        def build_chunker(channel: str):
+            async def _chunk(text: str):
+                await emit_stage_chunk(channel, text)
+            return _chunk
+
         # Keep director output internal. Director prompt is structured-planning oriented
         # and may emit JSON-like content that should not be shown to readers.
-        director_text = await director.think(
+        director_text = await director.think_stream(
             {
                 **draft_context,
                 "instruction": (
@@ -666,6 +685,7 @@ class StudioWorkflow:
                     f"{length_instruction}"
                 ),
             },
+            on_chunk=build_chunker("director"),
         )
         director_decision = director.decide(
             draft_context, [item["item_id"] for item in memory_hits[:5]]
@@ -673,12 +693,13 @@ class StudioWorkflow:
         director_decision.decision_text = director_text
         self.studio.add_decision(director_decision)
 
-        setter_text = await setter.think(
+        setter_text = await setter.think_stream(
             {
                 **draft_context,
                 "draft": director_text,
                 "instruction": "请指出本稿可能违反设定的点，并给出修订建议。",
-            }
+            },
+            on_chunk=build_chunker("setter"),
         )
         setter_decision = setter.decide(
             draft_context, [item["item_id"] for item in memory_hits[:5]]
@@ -686,7 +707,7 @@ class StudioWorkflow:
         setter_decision.decision_text = setter_text
         self.studio.add_decision(setter_decision)
 
-        stylist_text = await stylist.think(
+        stylist_text = await stylist.think_stream(
             {
                 **draft_context,
                 "draft": director_text,
@@ -696,7 +717,8 @@ class StudioWorkflow:
                     "保持节奏推进，避免把动作改成纯解释。"
                     f"{length_instruction}"
                 ),
-            }
+            },
+            on_chunk=build_chunker("stylist"),
         )
         stylist_decision = stylist.decide(
             draft_context, [item["item_id"] for item in memory_hits[:5]]
@@ -704,7 +726,7 @@ class StudioWorkflow:
         stylist_decision.decision_text = stylist_text
         self.studio.add_decision(stylist_decision)
 
-        # Stream only the final arbiter output to avoid leaking intermediate planning text.
+        # Stream arbiter output as the final channel.
         final_text = await arbiter.think_stream(
             {
                 **draft_context,
@@ -717,7 +739,7 @@ class StudioWorkflow:
                     f"{length_instruction}"
                 ),
             },
-            on_chunk=on_chunk,
+            on_chunk=build_chunker("arbiter"),
         )
         arbiter_decision = arbiter.decide(
             draft_context, [item["item_id"] for item in memory_hits[:5]]
