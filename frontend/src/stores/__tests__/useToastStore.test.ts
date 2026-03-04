@@ -14,6 +14,7 @@ const EXPECTED_DURATION: Record<ToastType, number> = {
 
 beforeEach(() => {
     useToastStore.setState({ toasts: [] })
+    vi.unstubAllGlobals()
 })
 
 describe('Feature: frontend-ux-overhaul, Property 4: Toast 类型与持续时间分配', () => {
@@ -143,5 +144,19 @@ describe('Feature: frontend-ux-polish, Task 5.1: Enhanced Toast fields', () => {
         expect(toast.context).toBe('创建章节')
         expect(toast.actions).toHaveLength(2)
         expect(toast.detail).toBe('Validation error: title is required')
+    })
+})
+
+describe('Compatibility: addToast should work when crypto.randomUUID is unavailable', () => {
+    it('does not throw and still appends a toast', () => {
+        const originalCrypto = globalThis.crypto
+        vi.stubGlobal('crypto', {
+            getRandomValues: originalCrypto.getRandomValues.bind(originalCrypto),
+        })
+
+        expect(() => {
+            useToastStore.getState().addToast('info', '兼容性测试')
+        }).not.toThrow()
+        expect(useToastStore.getState().toasts).toHaveLength(1)
     })
 })

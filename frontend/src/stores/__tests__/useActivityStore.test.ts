@@ -19,6 +19,7 @@ Object.defineProperty(globalThis, 'localStorage', { value: localStorageMock, wri
 beforeEach(() => {
     localStorageMock.clear()
     vi.clearAllMocks()
+    vi.unstubAllGlobals()
     useActivityStore.setState({ records: [], panelOpen: false })
 })
 
@@ -93,5 +94,21 @@ describe('useActivityStore', () => {
         })
         const stored = JSON.parse(localStorageMock.getItem('activity-records') || '[]')
         expect(stored[0].retryAction).toBeUndefined()
+    })
+
+    it('works when crypto.randomUUID is unavailable', () => {
+        const originalCrypto = globalThis.crypto
+        vi.stubGlobal('crypto', {
+            getRandomValues: originalCrypto.getRandomValues.bind(originalCrypto),
+        })
+
+        expect(() => {
+            useActivityStore.getState().addRecord({
+                type: 'save',
+                description: '兼容性测试',
+                status: 'success',
+            })
+        }).not.toThrow()
+        expect(useActivityStore.getState().records).toHaveLength(1)
     })
 })

@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { generateId } from '../utils/id'
 
 export type ActivityType = 'generate' | 'export' | 'save' | 'create' | 'delete' | 'approve' | 'error'
 export type ActivityStatus = 'success' | 'error' | 'pending'
@@ -52,7 +53,7 @@ export const useActivityStore = create<ActivityStore>((set, get) => ({
     addRecord: (record) => {
         const newRecord: ActivityRecord = {
             ...record,
-            id: crypto.randomUUID(),
+            id: generateId(),
             timestamp: Date.now(),
         }
         const updated = [newRecord, ...get().records].slice(0, MAX_RECORDS)
