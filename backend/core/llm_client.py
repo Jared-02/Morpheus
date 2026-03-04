@@ -1,35 +1,31 @@
 import os
 import time
 import logging
+import json
+import requests
 from typing import List, Optional, Dict, Any, Union, Iterator
 from enum import Enum
 
 
 class LLMProvider(str, Enum):
-    OPENAI = "openai"
-    MINIMAX = "minimax"
     DEEPSEEK = "deepseek"
 
 
 class LLMConfig:
     def __init__(
         self,
-        provider: LLMProvider = LLMProvider.OPENAI,
+        provider: LLMProvider = LLMProvider.DEEPSEEK,
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
-        model: str = "gpt-4-turbo-preview",
-        embedding_model: str = "text-embedding-3-small",
+        model: str = "deepseek-chat",
+        embedding_model: str = "deepseek-embedding",
         embedding_dimension: int = 1536,
         chat_max_tokens: Optional[int] = None,
         chat_temperature: Optional[float] = None,
         context_window_tokens: Optional[int] = None,
     ):
         self.provider = provider
-        default_key = os.getenv("OPENAI_API_KEY")
-        if provider == LLMProvider.MINIMAX:
-            default_key = os.getenv("MINIMAX_API_KEY") or default_key
-        elif provider == LLMProvider.DEEPSEEK:
-            default_key = os.getenv("DEEPSEEK_API_KEY") or default_key
+        default_key = os.getenv("DEEPSEEK_API_KEY")
         self.api_key = default_key if api_key is None else api_key
         self.model = model
         self.embedding_model = embedding_model
@@ -41,25 +37,17 @@ class LLMConfig:
             32768,
         )
 
-        if provider == LLMProvider.MINIMAX:
-            self.base_url = base_url or "https://api.minimaxi.com/v1"
-            self.model = model or "MiniMax-M2.5"
-            self.embedding_model = "embo-01"
-            self.embedding_dimension = 1024
-        elif provider == LLMProvider.DEEPSEEK:
-            self.base_url = base_url or os.getenv("DEEPSEEK_BASE_URL") or "https://api.deepseek.com"
-            self.model = model or "deepseek-chat"
-            default_chat_max_tokens = _safe_positive_int(os.getenv("DEEPSEEK_MAX_TOKENS"), 8192)
-            default_chat_temperature = _safe_temperature(
-                os.getenv("DEEPSEEK_TEMPERATURE"),
-                default_chat_temperature,
-            )
-            default_context_window_tokens = _safe_positive_int(
-                os.getenv("DEEPSEEK_CONTEXT_WINDOW_TOKENS"),
-                131072,
-            )
-        else:
-            self.base_url = base_url or "https://api.openai.com/v1"
+        self.base_url = base_url or os.getenv("DEEPSEEK_BASE_URL") or "https://api.deepseek.com"
+        self.model = model or "deepseek-chat"
+        default_chat_max_tokens = _safe_positive_int(os.getenv("DEEPSEEK_MAX_TOKENS"), 8192)
+        default_chat_temperature = _safe_temperature(
+            os.getenv("DEEPSEEK_TEMPERATURE"),
+            default_chat_temperature,
+        )
+        default_context_window_tokens = _safe_positive_int(
+            os.getenv("DEEPSEEK_CONTEXT_WINDOW_TOKENS"),
+            131072,
+        )
 
         self.chat_max_tokens = _safe_positive_int(
             chat_max_tokens,
@@ -104,6 +92,7 @@ class LLMClient:
         self._logger = logging.getLogger("novelist.llm")
         self._offline_warnings: set[str] = set()
         self._last_chat_meta: Dict[str, Any] = {}
+        self._http_timeout = 60
 
     def _set_last_chat_meta(self, **kwargs: Any):
         self._last_chat_meta = dict(kwargs)
@@ -122,14 +111,11 @@ class LLMClient:
             reason,
         )
 
-    def _get_client(self):
-        if self._client is not None:
-            return self._client
-
-        from openai import OpenAI
-
-        self._client = OpenAI(api_key=self.config.api_key, base_url=self.config.base_url)
-        return self._client
+    def _request_headers(self) -> Dict[str, str]:
+        return {
+            "Authorization": f"Bearer {self.config.api_key}",
+            "Content-Type": "application/json",
+        }
 
     def chat(
         self,
@@ -152,23 +138,33 @@ class LLMClient:
         try:
             actual_max_tokens = _safe_positive_int(max_tokens, self.config.chat_max_tokens)
             actual_temperature = _safe_temperature(temperature, self.config.chat_temperature)
-            client = self._get_client()
-            response = client.chat.completions.create(
-                model=self.config.model,
-                messages=messages,
-                temperature=actual_temperature,
-                max_tokens=actual_max_tokens,
-                stream=stream,
+            payload = {
+                "model": self.config.model,
+                "messages": messages,
+                "temperature": actual_temperature,
+                "max_tokens": actual_max_tokens,
+                "stream": bool(stream),
+            }
+            response = requests.post(
+                f"{self.config.base_url}/chat/completions",
+                headers=self._request_headers(),
+                json=payload,
+                timeout=self._http_timeout,
+                stream=bool(stream),
             )
+            response.raise_for_status()
+
             if stream:
-                self._logger.info(
-                    "llm chat remote stream provider=%s model=%s latency_ms=%.2f",
-                    self.config.provider.value,
-                    self.config.model,
-                    (time.perf_counter() - started) * 1000,
-                )
                 return response
-            content = response.choices[0].message.content
+
+            body = response.json()
+            content = (
+                ((body.get("choices") or [{}])[0].get("message") or {}).get("content")
+                if isinstance(body, dict)
+                else None
+            )
+            if not isinstance(content, str):
+                raise ValueError("chat response missing content")
             self._set_last_chat_meta(
                 mode="remote",
                 reason="success",
@@ -223,12 +219,25 @@ class LLMClient:
                 max_tokens=max_tokens,
                 stream=True,
             )
-            for chunk in response:
-                text = self._extract_stream_delta_text(chunk)
-                if not text:
+            if not isinstance(response, requests.Response):
+                raise ValueError("stream response is invalid")
+            for line in response.iter_lines(decode_unicode=True):
+                if not line:
                     continue
-                emitted_chars += len(text)
-                yield text
+                raw = line.strip()
+                if not raw.startswith("data:"):
+                    continue
+                data_part = raw[5:].strip()
+                if data_part == "[DONE]":
+                    break
+                try:
+                    payload = json.loads(data_part)
+                except Exception:
+                    continue
+                text = self._extract_stream_delta_text(payload)
+                if text:
+                    emitted_chars += len(text)
+                    yield text
             self._logger.info(
                 "llm chat remote stream done provider=%s model=%s latency_ms=%.2f chars=%d",
                 self.config.provider.value,
@@ -248,23 +257,29 @@ class LLMClient:
                 yield ch
 
     def embed_text(self, text: str) -> List[float]:
-        if self.config.provider == LLMProvider.MINIMAX:
-            return self._embed_minimax(text)
-        return self._embed_openai(text)
+        return self._embed_deepseek(text)
 
     def embed_batch(self, texts: List[str]) -> List[List[float]]:
-        if self.config.provider == LLMProvider.MINIMAX:
-            return self._embed_batch_minimax(texts)
-        return self._embed_batch_openai(texts)
+        return self._embed_batch_deepseek(texts)
 
-    def _embed_openai(self, text: str) -> List[float]:
+    def _embed_deepseek(self, text: str) -> List[float]:
         if not self.config.api_key:
             self._warn_offline_once("embedding_missing_api_key")
             return self._offline_embedding(text)
         try:
-            client = self._get_client()
-            response = client.embeddings.create(model=self.config.embedding_model, input=text)
-            return response.data[0].embedding
+            response = requests.post(
+                f"{self.config.base_url}/embeddings",
+                headers=self._request_headers(),
+                json={"model": self.config.embedding_model, "input": text},
+                timeout=self._http_timeout,
+            )
+            response.raise_for_status()
+            body = response.json()
+            data = (body.get("data") or [{}])[0] if isinstance(body, dict) else {}
+            embedding = data.get("embedding") if isinstance(data, dict) else None
+            if not isinstance(embedding, list):
+                raise ValueError("embedding response missing embedding")
+            return embedding
         except Exception as exc:
             self._logger.warning(
                 "embedding remote failed provider=%s model=%s error=%s fallback=offline",
@@ -274,14 +289,28 @@ class LLMClient:
             )
             return self._offline_embedding(text)
 
-    def _embed_batch_openai(self, texts: List[str]) -> List[List[float]]:
+    def _embed_batch_deepseek(self, texts: List[str]) -> List[List[float]]:
         if not self.config.api_key:
             self._warn_offline_once("embedding_batch_missing_api_key")
             return [self._offline_embedding(text) for text in texts]
         try:
-            client = self._get_client()
-            response = client.embeddings.create(model=self.config.embedding_model, input=texts)
-            return [item.embedding for item in response.data]
+            response = requests.post(
+                f"{self.config.base_url}/embeddings",
+                headers=self._request_headers(),
+                json={"model": self.config.embedding_model, "input": texts},
+                timeout=self._http_timeout,
+            )
+            response.raise_for_status()
+            body = response.json()
+            data = body.get("data") if isinstance(body, dict) else None
+            if not isinstance(data, list):
+                raise ValueError("embedding batch response missing data")
+            embeddings: List[List[float]] = []
+            for item in data:
+                if not isinstance(item, dict) or not isinstance(item.get("embedding"), list):
+                    raise ValueError("embedding batch item malformed")
+                embeddings.append(item["embedding"])
+            return embeddings
         except Exception as exc:
             self._logger.warning(
                 "embedding batch remote failed provider=%s model=%s error=%s fallback=offline",
@@ -290,72 +319,6 @@ class LLMClient:
                 exc,
             )
             return [self._offline_embedding(text) for text in texts]
-
-    def _embed_minimax(self, text: str) -> List[float]:
-        if not self.config.api_key:
-            self._warn_offline_once("embedding_missing_api_key")
-            return self._offline_embedding(text, dim=self.config.embedding_dimension)
-        import requests
-
-        url = "https://api.minimax.chat/v1/text/embedding"
-
-        headers = {
-            "Authorization": f"Bearer {self.config.api_key}",
-            "Content-Type": "application/json",
-        }
-
-        payload = {"model": self.config.embedding_model, "text": text}
-
-        try:
-            response = requests.post(url, headers=headers, json=payload, timeout=30)
-            response.raise_for_status()
-            data = response.json()
-            return data["data"]["embedding"]
-        except Exception as exc:
-            self._logger.warning(
-                "embedding remote failed provider=%s model=%s error=%s fallback=offline",
-                self.config.provider.value,
-                self.config.embedding_model,
-                exc,
-            )
-            return self._offline_embedding(text, dim=self.config.embedding_dimension)
-
-    def _embed_batch_minimax(self, texts: List[str]) -> List[List[float]]:
-        if not self.config.api_key:
-            self._warn_offline_once("embedding_batch_missing_api_key")
-            return [
-                self._offline_embedding(text, dim=self.config.embedding_dimension) for text in texts
-            ]
-        import requests
-
-        url = "https://api.minimax.chat/v1/text/embedding"
-
-        headers = {
-            "Authorization": f"Bearer {self.config.api_key}",
-            "Content-Type": "application/json",
-        }
-
-        embeddings = []
-
-        for text in texts:
-            payload = {"model": self.config.embedding_model, "text": text}
-            try:
-                response = requests.post(url, headers=headers, json=payload, timeout=30)
-                response.raise_for_status()
-                data = response.json()
-                embeddings.append(data["data"]["embedding"])
-            except Exception as exc:
-                self._logger.warning(
-                    "embedding batch item remote failed provider=%s model=%s error=%s fallback=offline",
-                    self.config.provider.value,
-                    self.config.embedding_model,
-                    exc,
-                )
-                embeddings.append(
-                    self._offline_embedding(text, dim=self.config.embedding_dimension)
-                )
-
-        return embeddings
 
     def _offline_chat(self, messages: List[Dict[str, str]]) -> str:
         # Keep offline outputs compact and avoid leaking full prompts/context into user-visible drafts.
@@ -382,23 +345,24 @@ class LLMClient:
 
     def _extract_stream_delta_text(self, chunk: Any) -> str:
         try:
-            choices = getattr(chunk, "choices", None)
+            choices = chunk.get("choices") if isinstance(chunk, dict) else None
             if choices:
-                delta = getattr(choices[0], "delta", None)
+                first = choices[0] if isinstance(choices[0], dict) else {}
+                delta = first.get("delta") if isinstance(first, dict) else None
                 if delta is not None:
-                    content = getattr(delta, "content", None)
+                    content = delta.get("content") if isinstance(delta, dict) else None
                     if isinstance(content, str):
                         return content
                     if isinstance(content, list):
                         parts: List[str] = []
                         for item in content:
-                            text = getattr(item, "text", None)
+                            text = item.get("text") if isinstance(item, dict) else None
                             if isinstance(text, str):
                                 parts.append(text)
                         return "".join(parts)
-                message = getattr(choices[0], "message", None)
+                message = first.get("message") if isinstance(first, dict) else None
                 if message is not None:
-                    msg_content = getattr(message, "content", None)
+                    msg_content = message.get("content") if isinstance(message, dict) else None
                     if isinstance(msg_content, str):
                         return msg_content
         except Exception:
@@ -416,15 +380,13 @@ class LLMClient:
         return vector
 
 
-def create_llm_client(provider: str = "openai", **kwargs) -> LLMClient:
-    candidate = (provider or "openai").strip().lower()
-    try:
-        llm_provider = LLMProvider(candidate)
-    except ValueError:
+def create_llm_client(provider: str = "deepseek", **kwargs) -> LLMClient:
+    candidate = (provider or "deepseek").strip().lower()
+    if candidate != LLMProvider.DEEPSEEK.value:
         logging.getLogger("novelist.llm").warning(
-            "unknown llm provider=%s fallback=openai",
+            "unsupported llm provider=%s fallback=deepseek",
             provider,
         )
-        llm_provider = LLMProvider.OPENAI
+    llm_provider = LLMProvider.DEEPSEEK
     config = LLMConfig(provider=llm_provider, **kwargs)
     return LLMClient(config)
