@@ -2,6 +2,8 @@
 .kiro/
 .sisyphus/
 .claude/
+AGENT.md
+CLAUDE.md
 
 # Python
 __pycache__/
