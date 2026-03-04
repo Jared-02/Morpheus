@@ -8,6 +8,7 @@ import { validateField, type FieldError } from '../utils/validation'
 import { api } from '../lib/api'
 import ChapterTOC from '../components/chapter/ChapterTOC'
 import ChapterExportMenu from '../components/chapter/ChapterExportMenu'
+import AgentProgressBar from '../components/chapter/AgentProgressBar'
 import ReadingModeView from '../components/ui/ReadingModeView'
 import type { ChapterContent } from '../services/exportService'
 import { useSSEStream } from '../hooks/useSSEStream'
@@ -883,6 +884,7 @@ export default function WritingConsolePage() {
                                 sectionViewModels.map((section, idx) => (
                                     <section key={section.chapterId} className="stream-section">
                                         <h1 className="stream-section__title">第{section.chapterNumber}章 {section.title}</h1>
+                                        {generating && <AgentProgressBar chapterId={section.chapterId} />}
                                         {section.narrativeBody && (
                                             <ReactMarkdown>{section.narrativeBody}</ReactMarkdown>
                                         )}

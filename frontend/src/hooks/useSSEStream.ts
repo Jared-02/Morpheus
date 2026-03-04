@@ -1,5 +1,5 @@
 import { useCallback, useRef } from 'react'
-import { useStreamStore, type StreamChapter, type StreamSection, type GenerationForm } from '../stores/useStreamStore'
+import { useStreamStore, type StreamChapter, type StreamSection, type GenerationForm, type ChapterStageEvent } from '../stores/useStreamStore'
 
 export interface UseSSEStreamOptions {
     projectId: string
@@ -93,6 +93,8 @@ export function useSSEStream() {
         setChapters,
         appendLog,
         setError,
+        setChapterStage,
+        clearStages,
     } = useStreamStore()
 
     const abortRef = useRef<AbortController | null>(null)
@@ -225,6 +227,17 @@ export function useSSEStream() {
             return
         }
 
+        if (eventName === 'chapter_stage') {
+            const evt = payload as ChapterStageEvent
+            const agentIds = new Set(['director', 'setter', 'stylist', 'arbiter'])
+            if (!agentIds.has(evt.stage)) return
+            const chapterId = String(evt.chapter_id || `chapter-${evt.chapter_number}`)
+            const statusLabel = evt.status === 'completed' ? '完成' : evt.status === 'failed' ? '失败' : '开始'
+            appendLog(`[${evt.agent_name || evt.stage}] ${evt.label} ${statusLabel} (${evt.progress_pct}%)`)
+            setChapterStage(chapterId, evt)
+            return
+        }
+
         if (eventName === 'log') {
             appendLog(String(payload.message || payload.raw || ''))
             return
@@ -250,7 +263,7 @@ export function useSSEStream() {
 
         // Forward other events as logs
         appendLog(`事件 ${eventName}`)
-    }, [appendLog, flushBuffers, setChapters, setError, setSections, scheduleFlush])
+    }, [appendLog, flushBuffers, setChapters, setChapterStage, setError, setSections, scheduleFlush])
 
     /* ── public API ── */
 
@@ -263,6 +276,7 @@ export function useSSEStream() {
         setSections([])
         setChapters(() => [])
         clearBuffers()
+        clearStages()
         appendLog('开始流式生成')
 
         const controller = new AbortController()
@@ -305,7 +319,7 @@ export function useSSEStream() {
             setGenerating(false)
             abortRef.current = null
         }
-    }, [appendLog, clearBuffers, flushBuffers, generating, handleEvent, setChapters, setError, setGenerating, setSections])
+    }, [appendLog, clearBuffers, clearStages, flushBuffers, generating, handleEvent, setChapters, setError, setGenerating, setSections])
 
     const stop = useCallback(() => {
         abortRef.current?.abort()

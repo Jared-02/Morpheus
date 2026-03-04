@@ -17,6 +17,22 @@ export interface StreamSection {
     waiting: boolean
 }
 
+export type AgentStageId = 'director' | 'setter' | 'stylist' | 'arbiter'
+export type AgentStageStatus = 'started' | 'completed' | 'failed'
+
+export interface ChapterStageEvent {
+    chapter_number: number
+    chapter_id: string
+    stage: AgentStageId
+    status: AgentStageStatus
+    label: string
+    agent_name: string
+    progress_pct: number
+    elapsed_ms: number
+    eta_ms?: number
+    mode: string
+}
+
 export interface GenerationForm {
     prompt: string
     mode: 'studio' | 'quick' | 'cinematic'
@@ -34,6 +50,7 @@ interface StreamStore {
     chapters: StreamChapter[]
     logs: string[]
     error: string | null
+    stages: Record<string, ChapterStageEvent>
 
     startStream: (projectId: string, form: GenerationForm) => void
     stopStream: () => void
@@ -45,6 +62,8 @@ interface StreamStore {
     setChapters: (v: StreamChapter[] | ((prev: StreamChapter[]) => StreamChapter[])) => void
     appendLog: (message: string) => void
     setError: (v: string | null) => void
+    setChapterStage: (chapterId: string, stage: ChapterStageEvent) => void
+    clearStages: () => void
 }
 
 function nowLabel() {
@@ -57,6 +76,7 @@ export const useStreamStore = create<StreamStore>((set) => ({
     chapters: [],
     logs: [],
     error: null,
+    stages: {},
 
     startStream: (_projectId: string, _form: GenerationForm) => {
         // 实际 SSE 逻辑将在 useSSEStream hook（Task 4.1）中实现
@@ -67,6 +87,7 @@ export const useStreamStore = create<StreamStore>((set) => ({
             chapters: [],
             logs: [],
             error: null,
+            stages: {},
         })
     },
 
@@ -81,6 +102,7 @@ export const useStreamStore = create<StreamStore>((set) => ({
             chapters: [],
             logs: [],
             error: null,
+            stages: {},
         })
     },
 
@@ -102,4 +124,11 @@ export const useStreamStore = create<StreamStore>((set) => ({
         })),
 
     setError: (v) => set({ error: v }),
+
+    setChapterStage: (chapterId, stage) =>
+        set((state) => ({
+            stages: { ...state.stages, [chapterId]: stage },
+        })),
+
+    clearStages: () => set({ stages: {} }),
 }))

@@ -592,6 +592,62 @@ pre {
   margin: 0;
 }
 
+/* ── Agent Progress Bar ── */
+
+.agent-progress {
+  display: grid;
+  gap: 6px;
+}
+
+.agent-progress__steps {
+  display: flex;
+  gap: 6px;
+}
+
+.agent-progress__step {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1.4;
+  border: 1px solid transparent;
+  transition: background 0.2s, color 0.2s;
+}
+
+.agent-progress__label {
+  white-space: nowrap;
+}
+
+.agent-progress__bar-track {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--bg-2);
+  overflow: hidden;
+}
+
+.agent-progress__bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent);
+  transition: width 0.4s ease;
+}
+
+@keyframes agent-spin {
+  to { transform: rotate(360deg); }
+}
+
+.agent-progress__spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid var(--accent-border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: agent-spin 0.8s linear infinite;
+}
+
 .stream-plan {
   border: 1px solid rgba(10, 139, 131, 0.28);
   border-radius: 14px;

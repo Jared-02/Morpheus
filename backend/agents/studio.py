@@ -1,6 +1,7 @@
 import ast
 import json
 import re
+import time
 import inspect
 import asyncio
 import threading
@@ -631,9 +632,15 @@ class StudioWorkflow:
         on_stage_chunk: Optional[Callable[[str, str], Any]] = None,
         on_stage: Optional[Callable[..., Any]] = None,
     ) -> str:
-        async def _emit_stage(stage_id: str, label: str):
+        async def _emit_stage(
+            stage_id: str,
+            label: str,
+            status: str = "started",
+            elapsed_ms: int = 0,
+            progress_pct: int = 0,
+        ):
             if on_stage:
-                maybe = on_stage(stage_id, label)
+                maybe = on_stage(stage_id, label, status, elapsed_ms, progress_pct)
                 if inspect.isawaitable(maybe):
                     await maybe
 
@@ -687,7 +694,8 @@ class StudioWorkflow:
                 await emit_stage_chunk(channel, text)
             return _chunk
 
-        await _emit_stage("director", "导演构思初稿")
+        await _emit_stage("director", "导演构思初稿", "started", 0, 0)
+        t0 = time.monotonic()
         director_text = await director.think_stream(
             {
                 **draft_context,
@@ -699,13 +707,15 @@ class StudioWorkflow:
             },
             on_chunk=build_chunker("director"),
         )
+        await _emit_stage("director", "导演构思初稿", "completed", int((time.monotonic() - t0) * 1000), 25)
         director_decision = director.decide(
             draft_context, [item["item_id"] for item in memory_hits[:5]]
         )
         director_decision.decision_text = director_text
         self.studio.add_decision(director_decision)
 
-        await _emit_stage("setter", "设定官审校")
+        await _emit_stage("setter", "设定官审校", "started", 0, 25)
+        t0 = time.monotonic()
         setter_text = await setter.think_stream(
             {
                 **draft_context,
@@ -714,13 +724,15 @@ class StudioWorkflow:
             },
             on_chunk=build_chunker("setter"),
         )
+        await _emit_stage("setter", "设定官审校", "completed", int((time.monotonic() - t0) * 1000), 50)
         setter_decision = setter.decide(
             draft_context, [item["item_id"] for item in memory_hits[:5]]
         )
         setter_decision.decision_text = setter_text
         self.studio.add_decision(setter_decision)
 
-        await _emit_stage("stylist", "文风润色")
+        await _emit_stage("stylist", "文风润色", "started", 0, 50)
+        t0 = time.monotonic()
         stylist_text = await stylist.think_stream(
             {
                 **draft_context,
@@ -734,13 +746,15 @@ class StudioWorkflow:
             },
             on_chunk=build_chunker("stylist"),
         )
+        await _emit_stage("stylist", "文风润色", "completed", int((time.monotonic() - t0) * 1000), 75)
         stylist_decision = stylist.decide(
             draft_context, [item["item_id"] for item in memory_hits[:5]]
         )
         stylist_decision.decision_text = stylist_text
         self.studio.add_decision(stylist_decision)
 
-        await _emit_stage("arbiter", "裁决器输出终稿")
+        await _emit_stage("arbiter", "裁决器输出终稿", "started", 0, 75)
+        t0 = time.monotonic()
         final_text = await arbiter.think_stream(
             {
                 **draft_context,
@@ -755,6 +769,7 @@ class StudioWorkflow:
             },
             on_chunk=build_chunker("arbiter"),
         )
+        await _emit_stage("arbiter", "裁决器输出终稿", "completed", int((time.monotonic() - t0) * 1000), 100)
         arbiter_decision = arbiter.decide(
             draft_context, [item["item_id"] for item in memory_hits[:5]]
         )

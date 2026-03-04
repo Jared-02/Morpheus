@@ -3713,14 +3713,31 @@ async def run_one_shot_book_generation(
             continuation_mode=req.continuation_mode,
         )
         chapter_started = datetime.now()
-        async def book_stage_callback(stage_id: str, label: str):
+        _agent_names = {
+            "director": "导演", "setter": "设定官",
+            "stylist": "文风润色", "arbiter": "裁决器",
+        }
+
+        async def book_stage_callback(
+            stage_id: str,
+            label: str,
+            status: str = "started",
+            elapsed_ms: int = 0,
+            progress_pct: int = 0,
+        ):
             await emit_progress(
                 progress,
                 "chapter_stage",
                 {
                     "chapter_number": chapter.chapter_number,
+                    "chapter_id": chapter.id,
                     "stage": stage_id,
+                    "status": status,
                     "label": label,
+                    "agent_name": _agent_names.get(stage_id, ""),
+                    "progress_pct": progress_pct,
+                    "elapsed_ms": elapsed_ms,
+                    "eta_ms": 0,
                     "mode": req.mode.value,
                 },
             )
@@ -4411,9 +4428,15 @@ async def generate_one_shot_draft_stream(chapter_id: str, req: OneShotDraftReque
             )
         await queue.put(("chunk", {"chunk": chunk}))
 
-    async def stage_callback(stage_id: str, label: str):
-        logger.info("one-shot stream stage=%s label=%s chapter_id=%s", stage_id, label, chapter.id)
-        await queue.put(("stage", {"stage": stage_id, "label": label}))
+    async def stage_callback(
+        stage_id: str, label: str,
+        status: str = "started", elapsed_ms: int = 0, progress_pct: int = 0,
+    ):
+        logger.info("one-shot stream stage=%s label=%s status=%s chapter_id=%s", stage_id, label, status, chapter.id)
+        await queue.put(("stage", {
+            "stage": stage_id, "label": label,
+            "status": status, "elapsed_ms": elapsed_ms, "progress_pct": progress_pct,
+        }))
 
     async def worker():
         try:
@@ -4927,8 +4950,14 @@ async def stream_draft(chapter_id: str, force: bool = False, resume_from: int = 
                     },
                 )
 
-            async def on_stage(stage_id: str, label: str):
-                await report("stage", {"stage": stage_id, "label": label})
+            async def on_stage(
+                stage_id: str, label: str,
+                status: str = "started", elapsed_ms: int = 0, progress_pct: int = 0,
+            ):
+                await report("stage", {
+                    "stage": stage_id, "label": label,
+                    "status": status, "elapsed_ms": elapsed_ms, "progress_pct": progress_pct,
+                })
 
             result = await _generate_draft_internal_stream(
                 chapter_id,
