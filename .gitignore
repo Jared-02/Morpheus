@@ -1,6 +1,7 @@
 # Kiro IDE
 .kiro/
 .sisyphus/
+.claude/
 
 # Python
 __pycache__/
