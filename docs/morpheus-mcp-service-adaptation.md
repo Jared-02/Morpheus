@@ -37,7 +37,7 @@ flowchart LR
   A["MCP Host (LLM/Agent)"] --> B["MCP Server (Tool Adapter)"]
   B --> C["Morpheus FastAPI"]
   C --> D["SQLite + LanceDB + File Storage"]
-  C --> E["LLM Providers (OpenAI / MiniMax / DeepSeek)"]
+  C --> E["LLM Provider (DeepSeek)"]
 ```
 
 设计原则：

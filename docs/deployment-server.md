@@ -18,7 +18,7 @@ cp backend/.env.example backend/.env
 编辑 `backend/.env`，至少完成：
 
 - `LLM_PROVIDER`
-- 对应 API Key（`MINIMAX_API_KEY` / `OPENAI_API_KEY` / `DEEPSEEK_API_KEY`）
+- 对应 API Key（`DEEPSEEK_API_KEY`）
 - `CORS_ALLOW_ORIGINS`：填你的域名，如 `https://your-domain.com`
 - `TRUSTED_HOSTS`：填你的域名，如 `your-domain.com,www.your-domain.com`
 

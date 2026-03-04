@@ -12,7 +12,7 @@
 - Visualization: Decision traces, knowledge graphs, timeline
 
 **Tech Stack:** 
-- Python 3.11+, FastAPI, SQLite, LanceDB, OpenAI API
+- Python 3.11+, FastAPI, SQLite, LanceDB, DeepSeek API
 - React 18, TypeScript, Tailwind, React Router, Zustand, Recharts
 
 ---
@@ -34,7 +34,7 @@
 - Files: `backend/memory/search.py`
 - Implements: VectorStore with LanceDB fallback
 - Implements: HybridSearchEngine merging FTS + vector results
-- Implements: EmbeddingProvider for OpenAI embeddings
+- Implements: EmbeddingProvider for DeepSeek embeddings
 
 ### Task 4: Multi-Agent Studio
 - Files: `backend/agents/studio.py`
@@ -123,11 +123,8 @@ Navigate to http://localhost:3000
 Set your provider key in `backend/.env`:
 
 ```
-# OpenAI
-OPENAI_API_KEY=sk-your-key-here
-
-# or MiniMax
-MINIMAX_API_KEY=your-minimax-key
+# DeepSeek
+DEEPSEEK_API_KEY=sk-your-key-here
 ```
 
 ---

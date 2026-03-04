@@ -19,35 +19,6 @@ npm install
 
 复制 `.env.example` 为 `.env` 并填写配置：
 
-### 使用 MiniMax (推荐)
-
-```bash
-# .env 配置
-LLM_PROVIDER=minimax
-REMOTE_LLM_ENABLED=true
-MINIMAX_API_KEY=your-minimax-api-key
-MINIMAX_MODEL=MiniMax-M2.5
-
-# Embedding 配置
-EMBEDDING_MODEL=embo-01
-EMBEDDING_DIMENSION=1024
-REMOTE_EMBEDDING_ENABLED=false
-```
-
-### 使用 OpenAI (备选)
-
-```bash
-# .env 配置
-LLM_PROVIDER=openai
-REMOTE_LLM_ENABLED=true
-OPENAI_API_KEY=sk-your-openai-api-key
-OPENAI_MODEL=gpt-4-turbo-preview
-
-# Embedding 配置
-EMBEDDING_MODEL=text-embedding-3-small
-EMBEDDING_DIMENSION=1536
-```
-
 ### 使用 DeepSeek (流式友好)
 
 ```bash
@@ -58,17 +29,17 @@ DEEPSEEK_API_KEY=sk-your-deepseek-api-key
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_MODEL=deepseek-chat
 
-# Embedding 配置（建议仍用 MiniMax/OpenAI；未配置时自动离线回退）
-EMBEDDING_MODEL=embo-01
-EMBEDDING_DIMENSION=1024
+# Embedding 配置
+EMBEDDING_MODEL=deepseek-embedding
+EMBEDDING_DIMENSION=1536
 REMOTE_EMBEDDING_ENABLED=false
 ```
 
 提示：如果你不写 `REMOTE_LLM_ENABLED`，后端会在检测到可用 API Key 时自动启用远程模式。
 
-## 3. 获取 MiniMax API 密钥
+## 3. 获取 DeepSeek API 密钥
 
-1. 访问 https://platform.minimaxi.com/
+1. 访问 https://platform.deepseek.com/
 2. 注册/登录账号
 3. 在控制台获取 API Key
 4. 确保账户有足够的配额
@@ -133,19 +104,8 @@ curl -X POST "http://127.0.0.1:8000/api/projects/<project_id>/prompt-preview" \
 
 ## 支持的模型
 
-### MiniMax (文本)
-- `MiniMax-M2.5` - 顶尖性能 (约 60 TPS)
-- `MiniMax-M2.5-highspeed` - 极速版 (约 100 TPS)
-- `MiniMax-M2.1` - 编程能力强
-- `MiniMax-M2.1-highspeed` - 极速版
-
 ### Embedding
-- `embo-01` - MiniMax 嵌入模型 (1024维)
-
-### OpenAI (备选)
-- `gpt-4-turbo-preview`
-- `gpt-4`
-- `text-embedding-3-small`
+- `deepseek-embedding` - DeepSeek 嵌入模型 (1536维)
 
 ### DeepSeek
 - `deepseek-chat`
@@ -159,7 +119,7 @@ curl -X POST "http://127.0.0.1:8000/api/projects/<project_id>/prompt-preview" \
 
 ### Embedding 服务报错
 - 确保 `EMBEDDING_MODEL` 与 provider 匹配
-- MiniMax 使用 `embo-01`，OpenAI 使用 `text-embedding-3-small`
+- DeepSeek 使用 `deepseek-embedding`
 - 本地优先模式下保持 `REMOTE_EMBEDDING_ENABLED=false` 可获得更稳定速度
 
 ### 前端无法连接后端
