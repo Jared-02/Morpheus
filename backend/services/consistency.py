@@ -235,10 +235,14 @@ class WorldRule(ConsistencyRule):
         return unique
 
     def _is_negated_match(self, normalized_draft: str, candidate: str) -> bool:
-        start = normalized_draft.find(candidate)
-        if start <= 0:
-            return False
-        return normalized_draft[start - 1] in {"不", "没", "无", "未"}
+        index = normalized_draft.find(candidate)
+        while index != -1:
+            if index == 0:
+                return False
+            if normalized_draft[index - 1] not in {"不", "没", "无", "未"}:
+                return False
+            index = normalized_draft.find(candidate, index + len(candidate))
+        return True
 
 
 class ForeshadowRule(ConsistencyRule):

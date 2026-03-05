@@ -94,6 +94,14 @@ const approvedChapter = {
     conflicts: [],
 }
 
+const approvedChapterWithEmptyDraft = {
+    ...sampleChapter,
+    status: 'approved',
+    draft: '',
+    final: '这是已审批终稿',
+    conflicts: [],
+}
+
 const reviewingChapter = {
     ...sampleChapter,
     status: 'reviewing',
@@ -673,6 +681,17 @@ describe('ChapterWorkbenchPage', () => {
             expect(mockApiPost).toHaveBeenCalledWith('/review', { chapter_id: 'ch-1', action: 'rescan' }, expect.any(Object))
             expect(mockAddToast).toHaveBeenCalledWith('success', '已重新打开审核，可继续修改后再提交审批')
         })
+    })
+
+    it('已审批且草稿为空时仍可重新打开审核', async () => {
+        mockApiGet.mockResolvedValue({ data: approvedChapterWithEmptyDraft })
+        renderPage()
+
+        await waitFor(() => {
+            expect(screen.getByText('重新打开审核')).toBeTruthy()
+        })
+
+        expect(screen.getByText('重新打开审核')).toHaveProperty('disabled', false)
     })
 
     it('待审核与已退回状态展示对应流程提示与统一主按钮', async () => {

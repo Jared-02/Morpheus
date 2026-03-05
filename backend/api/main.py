@@ -5633,7 +5633,8 @@ async def review_chapter(req: ReviewRequest):
             }
     elif req.action == ReviewAction.EXEMPT:
         if not P0_EXEMPTION_ALLOWED and any(
-            conflict.severity.value == "P0" for conflict in chapter.conflicts
+            conflict.severity.value == "P0" and not conflict.exempted and not conflict.resolved
+            for conflict in chapter.conflicts
         ):
             raise HTTPException(
                 status_code=400,

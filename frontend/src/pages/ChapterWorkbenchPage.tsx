@@ -496,10 +496,13 @@ export default function ChapterWorkbenchPage() {
     const statusKey = String(chapter?.status || 'draft').toLowerCase()
     const statusMeta = chapterStatusMeta[statusKey] || chapterStatusMeta.draft
     const isApproved = statusKey === 'approved'
-    const canSubmitApproval = !streaming && p0Conflicts.length === 0 && !!draftContent.trim()
+    const canApproveDraft = !streaming && p0Conflicts.length === 0 && !!draftContent.trim()
+    const canSubmitApproval = isApproved ? !streaming : canApproveDraft
     const primaryActionLabel = isApproved ? '重新打开审核' : '提交审批'
     const primaryActionReason = isApproved
-        ? '当前章节已审批，如需修改请先重新打开审核'
+        ? streaming
+            ? '正在生成中，请等待完成或停止当前任务'
+            : '当前章节已审批，如需修改请先重新打开审核'
         : p0Conflicts.length > 0
             ? '存在 P0 冲突，请先解决后再审批'
             : !draftContent.trim()

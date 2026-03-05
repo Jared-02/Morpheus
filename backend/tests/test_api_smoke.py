@@ -47,9 +47,11 @@ from models import (
     AgentDecision,
     AgentRole,
     AgentTrace,
+    Conflict,
     EntityState,
     EventEdge,
     ProjectStatus,
+    Severity,
     ChapterStatus,
     ChapterPlan,
     MemoryItem,
@@ -761,6 +763,76 @@ class NovelistApiSmokeTest(unittest.TestCase):
             exempt_res.json().get("detail"),
             "P0 conflicts cannot be exempted; resolve conflicts before approval",
         )
+
+    def test_exempt_allows_p1_when_only_resolved_p0_exists(self):
+        project_id = self._create_project(taboo_constraints=["禁词触发器"])
+        chapter_id = self._create_chapter(project_id, chapter_number=140)
+
+        self.client.post(f"/api/chapters/{chapter_id}/plan")
+        draft_res = self.client.post(f"/api/chapters/{chapter_id}/draft")
+        self.assertEqual(draft_res.status_code, 200)
+
+        p0_res = self.client.put(
+            f"/api/chapters/{chapter_id}/draft",
+            json={"draft": f"{draft_res.json()['draft']}\n禁词触发器"},
+        )
+        self.assertEqual(p0_res.status_code, 200)
+        self.assertGreaterEqual(p0_res.json()["consistency"]["p0_count"], 1)
+
+        chapter = chapters[chapter_id]
+        self.assertTrue(chapter.conflicts)
+        chapter.conflicts[0].resolved = True
+        chapter.conflicts.append(
+            Conflict(
+                id=f"manual-p1-{uuid4().hex[:8]}",
+                severity=Severity.P1,
+                rule_id="R5",
+                reason="手工补充P1用于豁免流程验证",
+                evidence_paths=["chapter_140"],
+                chapter_id=140,
+            )
+        )
+        save_chapter(chapter)
+
+        exempt_res = self.client.post(
+            "/api/review",
+            json={
+                "chapter_id": chapter_id,
+                "action": "exempt",
+                "comment": "allow p1 exemption when p0 resolved",
+            },
+        )
+        self.assertEqual(exempt_res.status_code, 200)
+
+        chapter_res = self.client.get(f"/api/chapters/{chapter_id}")
+        self.assertEqual(chapter_res.status_code, 200)
+        conflicts = chapter_res.json().get("conflicts") or []
+        target = next((c for c in conflicts if c.get("rule_id") == "R5"), None)
+        self.assertIsNotNone(target)
+        self.assertTrue(target.get("exempted"))
+
+    def test_worldrule_mixed_negative_and_positive_should_block_submit(self):
+        project_id = self._create_project()
+        self._create_chapter(project_id, chapter_number=141)
+
+        update_identity_res = self.client.put(
+            f"/api/identity/{project_id}",
+            json={"content": "# IDENTITY\n- [世界规则]：主角不能前往北境\n"},
+        )
+        self.assertEqual(update_identity_res.status_code, 200)
+
+        check_res = self.client.post(
+            "/api/consistency/check",
+            json={
+                "project_id": project_id,
+                "chapter_id": 141,
+                "draft": "主角本来不前往北境，但最终还是前往北境。",
+            },
+        )
+        self.assertEqual(check_res.status_code, 200)
+        payload = check_res.json()
+        self.assertFalse(payload["can_submit"])
+        self.assertGreaterEqual(payload["p0_count"], 1)
 
     def test_approve_allows_resolved_p0_conflicts(self):
         project_id = self._create_project(taboo_constraints=["禁词触发器"])
