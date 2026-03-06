@@ -9,9 +9,6 @@ interface ProjectCreateModalProps {
 }
 
 const GENRE_PRESETS = ['奇幻', '科幻', '悬疑', '历史', '都市']
-const STYLE_PRESETS = ['冷峻现实主义', '硬核纪实', '黑色幽默', '史诗抒情', '轻快治愈']
-const CUSTOM_GENRE_VALUE = '__custom__'
-const CUSTOM_STYLE_VALUE = '__custom__'
 
 interface StoryTemplate {
     id: string
@@ -133,10 +130,6 @@ export default function ProjectCreateModal({ open, onClose }: ProjectCreateModal
     if (!open) return null
 
     const selectedTemplate = templates.find((item) => item.id === form.template_id)
-    const isCustomGenre = !GENRE_PRESETS.includes(form.genre)
-    const selectedGenreOption = isCustomGenre ? CUSTOM_GENRE_VALUE : form.genre
-    const isCustomStyle = !STYLE_PRESETS.includes(form.style)
-    const selectedStyleOption = isCustomStyle ? CUSTOM_STYLE_VALUE : form.style
 
     const applyTemplate = (template: StoryTemplate) => {
         setForm((prev) => {
@@ -271,60 +264,30 @@ export default function ProjectCreateModal({ open, onClose }: ProjectCreateModal
                     {/* 题材 + 文风 — 两列 */}
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                         <label>
-                            <div className="metric-label" style={{ marginBottom: 4 }}>题材</div>
-                            <select
-                                className="select"
-                                value={selectedGenreOption}
-                                onChange={(e) => {
-                                    const nextValue = e.target.value
-                                    setForm({
-                                        ...form,
-                                        genre: nextValue === CUSTOM_GENRE_VALUE ? '' : nextValue,
-                                    })
-                                }}
-                            >
+                            <div className="metric-label" style={{ marginBottom: 6 }}>题材</div>
+                            <input
+                                className="input"
+                                list="project-genre-options"
+                                value={form.genre}
+                                onChange={(e) => setForm({ ...form, genre: e.target.value })}
+                                placeholder="例如：赛博修仙 / 太空歌剧 / 克苏鲁"
+                            />
+                            <datalist id="project-genre-options">
                                 {GENRE_PRESETS.map((genre) => (
-                                    <option key={genre} value={genre}>{genre}</option>
+                                    <option key={genre} value={genre} />
                                 ))}
-                                <option value={CUSTOM_GENRE_VALUE}>自定义题材</option>
-                            </select>
-                            {selectedGenreOption === CUSTOM_GENRE_VALUE && (
-                                <input
-                                    className="input"
-                                    value={form.genre}
-                                    onChange={(e) => setForm({ ...form, genre: e.target.value })}
-                                    placeholder="输入自定义题材，如：赛博修仙 / 克苏鲁"
-                                    style={{ marginTop: 8 }}
-                                />
-                            )}
+                            </datalist>
+                            <div className="muted" style={{ marginTop: 6, fontSize: '0.78rem' }}>
+                                可直接输入自定义题材，也可选择常用题材
+                            </div>
                         </label>
                         <label>
-                            <div className="metric-label" style={{ marginBottom: 4 }}>文风契约</div>
-                            <select
-                                className="select"
-                                value={selectedStyleOption}
-                                onChange={(e) => {
-                                    const nextValue = e.target.value
-                                    setForm({
-                                        ...form,
-                                        style: nextValue === CUSTOM_STYLE_VALUE ? '' : nextValue,
-                                    })
-                                }}
-                            >
-                                {STYLE_PRESETS.map((style) => (
-                                    <option key={style} value={style}>{style}</option>
-                                ))}
-                                <option value={CUSTOM_STYLE_VALUE}>自定义文风</option>
-                            </select>
-                            {selectedStyleOption === CUSTOM_STYLE_VALUE && (
-                                <input
-                                    className="input"
-                                    value={form.style}
-                                    onChange={(e) => setForm({ ...form, style: e.target.value })}
-                                    placeholder="输入自定义文风，如：黑色幽默 / 史诗抒情"
-                                    style={{ marginTop: 8 }}
-                                />
-                            )}
+                            <div className="metric-label" style={{ marginBottom: 6 }}>文风契约</div>
+                            <input
+                                className="input"
+                                value={form.style}
+                                onChange={(e) => setForm({ ...form, style: e.target.value })}
+                            />
                         </label>
                     </div>
 

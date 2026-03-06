@@ -15,6 +15,7 @@ class OverrideSource(str, Enum):
     LLM_EXTRACTED = "llm_extracted"
     USER_OVERRIDE = "user_override"
 
+
 class Severity(str, Enum):
     P0 = "P0"
     P1 = "P1"
@@ -105,6 +106,7 @@ class Project(BaseModel):
     genre: str
     style: str
     template_id: Optional[str] = None
+    synopsis: Optional[str] = None
     fanqie_book_id: Optional[str] = None
     target_length: int = 300000
     taboo_constraints: List[str] = Field(default_factory=list)

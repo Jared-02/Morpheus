@@ -22,7 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from starlette.background import BackgroundTask
 from starlette.middleware.trustedhost import TrustedHostMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from agents.studio import AGENT_PROMPTS, AgentStudio, StudioWorkflow
@@ -1640,7 +1640,6 @@ def build_outline_messages(
     *,
     prompt: str,
     chapter_count: int,
-    scope: str,
     project: Project,
     identity: str,
     continuation_mode: bool = False,
@@ -1672,7 +1671,6 @@ def build_outline_messages(
             "content": json.dumps(
                 {
                     "task": "根据一句话梗概拆成章节蓝图",
-                    "scope": scope,
                     "chapter_count": chapter_count,
                     "prompt": prompt,
                     "genre": project.genre,
@@ -1706,7 +1704,6 @@ def build_chapter_outline(
     *,
     prompt: str,
     chapter_count: int,
-    scope: str,
     project: Project,
     store: MemoryStore,
     studio: AgentStudio,
@@ -1718,7 +1715,6 @@ def build_chapter_outline(
     messages = build_outline_messages(
         prompt=prompt,
         chapter_count=chapter_count,
-        scope=scope,
         project=project,
         identity=identity,
         continuation_mode=continuation_mode,
@@ -1741,8 +1737,7 @@ def build_chapter_outline(
             existing_titles=existing_titles,
         )
         logger.info(
-            "outline generated via model scope=%s chapters=%d",
-            scope,
+            "outline generated via model chapters=%d",
             chapter_count,
         )
         return normalized
@@ -1757,8 +1752,7 @@ def build_chapter_outline(
             existing_titles=existing_titles,
         )
         logger.warning(
-            "outline parse failed using fallback scope=%s chapters=%d",
-            scope,
+            "outline parse failed using fallback chapters=%d",
             chapter_count,
         )
         return normalized_fallback
@@ -2694,6 +2688,7 @@ class CreateProjectRequest(BaseModel):
     genre: str
     style: str
     template_id: Optional[str] = None
+    synopsis: Optional[str] = None
     target_length: int = 300000
     taboo_constraints: List[str] = Field(default_factory=list)
 
@@ -2768,26 +2763,31 @@ class OneShotDraftRequest(BaseModel):
     continuation_mode: bool = False
 
 
-class GenerationScope(str, Enum):
-    VOLUME = "volume"
-    BOOK = "book"
+class ChapterDirectionRequest(BaseModel):
+    direction_hint: Optional[str] = None
 
 
 class OneShotBookRequest(BaseModel):
-    prompt: str
+    model_config = ConfigDict(extra="forbid")
+
+    prompt: str = ""
+    batch_direction: Optional[str] = None
     mode: GenerationMode = GenerationMode.STUDIO
-    scope: GenerationScope = GenerationScope.VOLUME
     chapter_count: Optional[int] = Field(default=None, ge=1, le=60)
     words_per_chapter: int = Field(default=1600, ge=300, le=12000)
-    start_chapter_number: Optional[int] = Field(default=None, ge=1)
     auto_approve: bool = False
     continuation_mode: bool = False
+
+    @model_validator(mode="after")
+    def apply_batch_direction_alias(self):
+        if not self.prompt and self.batch_direction:
+            self.prompt = self.batch_direction
+        return self
 
 
 class PromptPreviewRequest(BaseModel):
     prompt: str
     mode: GenerationMode = GenerationMode.STUDIO
-    scope: GenerationScope = GenerationScope.VOLUME
     chapter_count: int = Field(default=8, ge=1, le=60)
     target_words: int = Field(default=1600, ge=300, le=12000)
     chapter_number: int = Field(default=1, ge=1)
@@ -3235,7 +3235,6 @@ async def prompt_preview(project_id: str, req: PromptPreviewRequest):
     outline_messages = build_outline_messages(
         prompt=req.prompt,
         chapter_count=req.chapter_count,
-        scope=req.scope.value,
         project=project,
         identity=identity[:2500],
         continuation_mode=False,
@@ -3301,6 +3300,7 @@ async def create_project(req: CreateProjectRequest):
         genre=req.genre,
         style=req.style,
         template_id=selected_template["id"] if selected_template else None,
+        synopsis=(req.synopsis or "").strip() or None,
         target_length=resolved_target_length,
         taboo_constraints=merged_taboos,
         status=ProjectStatus.INIT,
@@ -3333,6 +3333,11 @@ async def create_project(req: CreateProjectRequest):
         identity += f"- {selected_template.get('prompt_hint', '')}\n\n"
     else:
         identity += "- (未指定)\n\n"
+    identity += "## Story Synopsis\n"
+    if project.synopsis:
+        identity += f"- {project.synopsis}\n\n"
+    else:
+        identity += "- (未提供)\n\n"
     identity += "## Hard Taboos\n"
     if merged_taboos:
         identity += "".join(f"- {item}\n" for item in merged_taboos)
@@ -3354,6 +3359,7 @@ async def create_project(req: CreateProjectRequest):
         "id": project.id,
         "name": project.name,
         "template_id": project.template_id,
+        "synopsis": project.synopsis,
         "fanqie_book_id": project.fanqie_book_id,
         "status": project.status.value,
         "created_at": project.created_at.isoformat(),
@@ -3657,6 +3663,7 @@ async def get_project(project_id: str):
         "genre": project.genre,
         "style": project.style,
         "template_id": project.template_id,
+        "synopsis": project.synopsis,
         "fanqie_book_id": project.fanqie_book_id,
         "target_length": project.target_length,
         "taboo_constraints": project.taboo_constraints,
@@ -3720,19 +3727,17 @@ async def run_one_shot_book_generation(
         "start",
         {
             "project_id": project_id,
-            "scope": req.scope.value,
             "mode": req.mode.value,
             "chapter_count": req.chapter_count,
             "words_per_chapter": req.words_per_chapter,
             "auto_approve": req.auto_approve,
             "continuation_mode": req.continuation_mode,
-            "start_chapter_number": req.start_chapter_number,
         },
     )
 
     chapter_count = req.chapter_count
     if chapter_count is None:
-        chapter_count = 8 if req.scope == GenerationScope.VOLUME else 20
+        chapter_count = 8
     chapter_count = max(1, min(chapter_count, 60))
 
     existing = chapter_list(project_id)
@@ -3740,15 +3745,12 @@ async def run_one_shot_book_generation(
         str(ch.title or "").strip() for ch in existing if str(ch.title or "").strip()
     ]
     existing_numbers = {c.chapter_number for c in existing}
-    next_number = req.start_chapter_number or (
-        (max(existing_numbers) + 1) if existing_numbers else 1
-    )
+    next_number = (max(existing_numbers) + 1) if existing_numbers else 1
 
     await emit_progress(
         progress,
         "outline_start",
         {
-            "scope": req.scope.value,
             "chapter_count": chapter_count,
             "continuation_mode": req.continuation_mode,
         },
@@ -3757,7 +3759,6 @@ async def run_one_shot_book_generation(
         build_chapter_outline,
         prompt=req.prompt.strip(),
         chapter_count=chapter_count,
-        scope=req.scope.value,
         project=project,
         store=store,
         studio=studio,
@@ -3966,7 +3967,7 @@ async def run_one_shot_book_generation(
             trace=trace,
             draft=draft,
             started=chapter_started,
-            source_label=f"整{req.scope.value}生成[{req.mode.value}]",
+            source_label=f"批量生成[{req.mode.value}]",
         )
 
         streamed_text = "".join(streamed_fragments)
@@ -4097,7 +4098,7 @@ async def run_one_shot_book_generation(
     project.updated_at = datetime.now()
     save_project(project)
     store.three_layer.add_log(
-        f"整{req.scope.value}生成完成：{len(created)}章，mode={req.mode.value}，耗时{(datetime.now() - started).total_seconds():.2f}s"
+        f"批量生成完成：{len(created)}章，mode={req.mode.value}，耗时{(datetime.now() - started).total_seconds():.2f}s"
     )
     elapsed = (datetime.now() - started).total_seconds()
     logger.info(
@@ -4109,11 +4110,9 @@ async def run_one_shot_book_generation(
 
     response_payload = {
         "project_id": project_id,
-        "scope": req.scope.value,
         "mode": req.mode.value,
         "prompt": req.prompt.strip(),
         "continuation_mode": req.continuation_mode,
-        "start_chapter_number": first_assigned_number,
         "generated_chapters": len(created),
         "chapters": created,
         "elapsed_s": elapsed,
@@ -4136,15 +4135,13 @@ async def generate_one_shot_book(project_id: str, req: OneShotBookRequest):
     studio = get_or_create_studio(project_id)
     store.sync_file_memories()
     logger.info(
-        "one-shot-book start project_id=%s scope=%s mode=%s chapter_count=%s words_per_chapter=%d auto_approve=%s continuation_mode=%s start_chapter=%s",
+        "one-shot-book start project_id=%s mode=%s chapter_count=%s words_per_chapter=%d auto_approve=%s continuation_mode=%s",
         project_id,
-        req.scope.value,
         req.mode.value,
         req.chapter_count if req.chapter_count is not None else "default",
         req.words_per_chapter,
         req.auto_approve,
         req.continuation_mode,
-        req.start_chapter_number if req.start_chapter_number is not None else "auto",
     )
     return await run_one_shot_book_generation(
         project_id=project_id,
@@ -4169,15 +4166,13 @@ async def generate_one_shot_book_stream(project_id: str, req: OneShotBookRequest
     studio = get_or_create_studio(project_id)
     store.sync_file_memories()
     logger.info(
-        "one-shot-book stream start project_id=%s scope=%s mode=%s chapter_count=%s words_per_chapter=%d auto_approve=%s continuation_mode=%s start_chapter=%s",
+        "one-shot-book stream start project_id=%s mode=%s chapter_count=%s words_per_chapter=%d auto_approve=%s continuation_mode=%s",
         project_id,
-        req.scope.value,
         req.mode.value,
         req.chapter_count if req.chapter_count is not None else "default",
         req.words_per_chapter,
         req.auto_approve,
         req.continuation_mode,
-        req.start_chapter_number if req.start_chapter_number is not None else "auto",
     )
 
     queue: asyncio.Queue[tuple[str, Dict[str, Any]]] = asyncio.Queue()
@@ -4471,7 +4466,7 @@ async def update_draft(chapter_id: str, payload: UpdateDraftRequest):
 
 
 @app.post("/api/chapters/{chapter_id}/plan")
-async def generate_plan(chapter_id: str):
+async def generate_plan(chapter_id: str, req: Optional[ChapterDirectionRequest] = None):
     chapter = resolve_chapter(chapter_id)
     if not chapter:
         raise HTTPException(status_code=404, detail="Chapter not found")
@@ -4502,6 +4497,10 @@ async def generate_plan(chapter_id: str):
         for c in chapter_list(chapter.project_id)
     ]
     context_pack = mem_ctx.build_generation_context_pack(chapter.chapter_number, project_chapters)
+
+    direction_hint = (req.direction_hint if req else None) or ""
+    if direction_hint.strip():
+        chapter.goal = direction_hint.strip()
 
     try:
         plan = await workflow.generate_plan(
@@ -6255,15 +6254,12 @@ async def get_profile(project_id: str, profile_id: str):
     return profile.model_dump(mode="json")
 
 
-from pydantic import model_validator as _mv
-
-
 class RebuildRequest(BaseModel):
     start_chapter: Optional[int] = Field(default=None, ge=1)
     end_chapter: Optional[int] = Field(default=None, ge=1)
     character_names: Optional[List[str]] = None
 
-    @_mv(mode="after")
+    @model_validator(mode="after")
     def check_range(self):
         if self.start_chapter is not None and self.end_chapter is not None:
             if self.start_chapter > self.end_chapter:
