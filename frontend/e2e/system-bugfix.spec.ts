@@ -1,5 +1,7 @@
 import { expect, test, type Page } from '@playwright/test'
 
+declare const process: { env: Record<string, string | undefined> }
+
 const API_BASE = process.env.E2E_API_BASE_URL || 'http://localhost:8000/api'
 const SCREENSHOT_DIR = '../output/playwright'
 
@@ -12,11 +14,15 @@ async function createProjectFromModal(page: Page, name: string) {
 
   await modal.locator('input').first().fill(name)
 
-  const genreInput = modal.locator('input[list="project-genre-options"]')
+  const genreSelect = modal.getByRole('combobox', { name: '题材' })
+  await genreSelect.selectOption('__custom__')
+  const genreInput = modal.getByPlaceholder('输入自定义题材，如：赛博修仙 / 克苏鲁')
   await genreInput.fill('太空歌剧')
   await expect(genreInput).toBeFocused()
 
-  const styleInput = modal.locator('label:has-text("文风契约") input')
+  const styleSelect = modal.getByRole('combobox', { name: '文风契约' })
+  await styleSelect.selectOption('__custom__')
+  const styleInput = modal.getByPlaceholder('输入自定义文风，如：黑色幽默 / 史诗抒情')
   await styleInput.fill('冷峻现实主义')
   await expect(styleInput).toBeFocused()
 

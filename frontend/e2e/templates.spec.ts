@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test'
 
+declare const process: { env: Record<string, string | undefined> }
+
 const API_BASE = process.env.E2E_API_BASE_URL || 'http://localhost:8000/api'
 const SCREENSHOT_DIR = '../output/playwright'
 
@@ -25,8 +27,13 @@ test('template flow regression', async ({ page, request }) => {
     await expect(targetLengthInput).toHaveValue('320000')
 
     await modal.getByLabel('项目名称').fill(projectName)
-    await modal.getByLabel('题材').fill('太空歌剧')
-    await modal.getByLabel('文风契约').fill('冷峻现实主义')
+    const genreSelect = modal.getByRole('combobox', { name: '题材' })
+    await genreSelect.selectOption('__custom__')
+    await modal.getByPlaceholder('输入自定义题材，如：赛博修仙 / 克苏鲁').fill('太空歌剧')
+
+    const styleSelect = modal.getByRole('combobox', { name: '文风契约' })
+    await styleSelect.selectOption('__custom__')
+    await modal.getByPlaceholder('输入自定义文风，如：黑色幽默 / 史诗抒情').fill('冷峻现实主义')
     await modal.getByRole('button', { name: '创建项目' }).click()
     await expect(modal).toHaveCount(0)
 

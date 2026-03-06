@@ -5,12 +5,23 @@ import ProjectList from '../ProjectList'
 import { useProjectStore } from '../../stores/useProjectStore'
 import { useToastStore } from '../../stores/useToastStore'
 
-// Mock useNavigate
 const mockNavigate = vi.fn()
 vi.mock('react-router-dom', async () => {
     const actual = await vi.importActual('react-router-dom')
     return { ...actual, useNavigate: () => mockNavigate }
 })
+
+vi.mock('../../lib/api', () => ({
+    api: {
+        get: vi.fn((url: string) =>
+            Promise.resolve(
+                url === '/story-templates'
+                    ? { data: { templates: [] } }
+                    : { data: [] }
+            )
+        ),
+    },
+}))
 
 function renderPage() {
     return render(
@@ -18,6 +29,13 @@ function renderPage() {
             <ProjectList />
         </MemoryRouter>
     )
+}
+
+async function openCreateModal() {
+    fireEvent.click(screen.getByText('新建项目'))
+    await waitFor(() => {
+        expect(screen.getByText('自由创作')).toBeInTheDocument()
+    })
 }
 
 const sampleProjects = [
@@ -115,36 +133,41 @@ describe('ProjectListPage', () => {
         expect(mockNavigate).toHaveBeenCalledWith('/project/p1')
     })
 
-    it('shows story template selector in create modal', () => {
+    it('shows story template selector in create modal', async () => {
         useProjectStore.setState({ projects: [], loading: false })
         renderPage()
-        fireEvent.click(screen.getByText('新建项目'))
+        await openCreateModal()
         expect(screen.getByText('创作模板')).toBeInTheDocument()
-        expect(screen.getByText('不使用模板（自由创作）')).toBeInTheDocument()
     })
 
     it('keeps focus on edited genre/style fields without jumping back to name', async () => {
         useProjectStore.setState({ projects: [], loading: false })
         renderPage()
 
-        fireEvent.click(screen.getByText('新建项目'))
+        await openCreateModal()
         const nameInput = screen.getByPlaceholderText('例如：霜城编年史')
-        const genreInput = screen.getByPlaceholderText('例如：赛博修仙 / 太空歌剧 / 克苏鲁')
-        const styleInput = screen.getByDisplayValue('冷峻现实主义')
+        const genreSelect = screen.getByRole('combobox', { name: '题材' })
+        const styleSelect = screen.getByRole('combobox', { name: '文风契约' })
 
         await waitFor(() => expect(nameInput).toHaveFocus())
 
+        fireEvent.change(genreSelect, { target: { value: '__custom__' } })
+        const genreInput = await screen.findByPlaceholderText('输入自定义题材，如：赛博修仙 / 克苏鲁')
         genreInput.focus()
         expect(genreInput).toHaveFocus()
         fireEvent.change(genreInput, { target: { value: '赛博修仙' } })
         await new Promise((resolve) => setTimeout(resolve, 0))
         expect(genreInput).toHaveFocus()
 
+        fireEvent.change(styleSelect, { target: { value: '__custom__' } })
+        const styleInput = await screen.findByPlaceholderText('输入自定义文风，如：黑色幽默 / 史诗抒情')
         styleInput.focus()
         expect(styleInput).toHaveFocus()
         fireEvent.change(styleInput, { target: { value: '硬核纪实' } })
         await new Promise((resolve) => setTimeout(resolve, 0))
-        expect(styleInput).toHaveFocus()
+        const refreshedStyleInput = await screen.findByDisplayValue('硬核纪实')
+        expect(refreshedStyleInput).toBeInTheDocument()
+        expect(nameInput).not.toHaveFocus()
     })
 
     it('shows toast on successful project creation', async () => {
@@ -152,7 +175,7 @@ describe('ProjectListPage', () => {
         useProjectStore.setState({ projects: [], loading: false, createProject } as any)
         renderPage()
 
-        fireEvent.click(screen.getByText('新建项目'))
+        await openCreateModal()
         fireEvent.change(screen.getByPlaceholderText('例如：霜城编年史'), {
             target: { value: '测试项目' },
         })
@@ -171,7 +194,7 @@ describe('ProjectListPage', () => {
         useProjectStore.setState({ projects: [], loading: false, createProject } as any)
         renderPage()
 
-        fireEvent.click(screen.getByText('新建项目'))
+        await openCreateModal()
         fireEvent.change(screen.getByPlaceholderText('例如：霜城编年史'), {
             target: { value: '测试项目' },
         })
@@ -189,12 +212,21 @@ describe('ProjectListPage', () => {
         useProjectStore.setState({ projects: [], loading: false, createProject } as any)
         renderPage()
 
-        fireEvent.click(screen.getByText('新建项目'))
+        await openCreateModal()
         fireEvent.change(screen.getByPlaceholderText('例如：霜城编年史'), {
             target: { value: '不靠谱事务所' },
         })
-        fireEvent.change(screen.getByPlaceholderText('例如：赛博修仙 / 太空歌剧 / 克苏鲁'), {
+        fireEvent.change(screen.getByRole('combobox', { name: '题材' }), {
+            target: { value: '__custom__' },
+        })
+        fireEvent.change(await screen.findByPlaceholderText('输入自定义题材，如：赛博修仙 / 克苏鲁'), {
             target: { value: '赛博修仙' },
+        })
+        fireEvent.change(screen.getByRole('combobox', { name: '文风契约' }), {
+            target: { value: '__custom__' },
+        })
+        fireEvent.change(await screen.findByPlaceholderText('输入自定义文风，如：黑色幽默 / 史诗抒情'), {
+            target: { value: '硬核纪实' },
         })
         fireEvent.click(screen.getByText('创建项目'))
 
@@ -205,15 +237,52 @@ describe('ProjectListPage', () => {
             expect.objectContaining({
                 name: '不靠谱事务所',
                 genre: '赛博修仙',
+                style: '硬核纪实',
             }),
         )
+    })
+
+    it('renders genre as a real dropdown and allows switching to custom genre input', async () => {
+        useProjectStore.setState({ projects: [], loading: false })
+        renderPage()
+
+        await openCreateModal()
+
+        expect(screen.getByRole('combobox', { name: '题材' })).toBeInTheDocument()
+        expect(screen.getByRole('option', { name: '奇幻' })).toBeInTheDocument()
+        expect(screen.getByRole('option', { name: '自定义题材' })).toBeInTheDocument()
+
+        fireEvent.change(screen.getByRole('combobox', { name: '题材' }), {
+            target: { value: '__custom__' },
+        })
+
+        const customGenreInput = await screen.findByPlaceholderText('输入自定义题材，如：赛博修仙 / 克苏鲁')
+        expect(customGenreInput).toHaveValue('')
+    })
+
+    it('renders style as a real dropdown and allows switching to custom style input', async () => {
+        useProjectStore.setState({ projects: [], loading: false })
+        renderPage()
+
+        await openCreateModal()
+
+        expect(screen.getByRole('combobox', { name: '文风契约' })).toBeInTheDocument()
+        expect(screen.getByRole('option', { name: '冷峻现实主义' })).toBeInTheDocument()
+        expect(screen.getByRole('option', { name: '自定义文风' })).toBeInTheDocument()
+
+        fireEvent.change(screen.getByRole('combobox', { name: '文风契约' }), {
+            target: { value: '__custom__' },
+        })
+
+        const customStyleInput = await screen.findByPlaceholderText('输入自定义文风，如：黑色幽默 / 史诗抒情')
+        expect(customStyleInput).toHaveValue('')
     })
 
     it('allows clearing and retyping target length without forcing 0', async () => {
         useProjectStore.setState({ projects: [], loading: false })
         renderPage()
 
-        fireEvent.click(screen.getByText('新建项目'))
+        await openCreateModal()
         const dialog = screen.getByRole('dialog')
         const targetInput = dialog.querySelector('input[type="number"]') as HTMLInputElement
         expect(targetInput).toBeTruthy()
@@ -224,6 +293,18 @@ describe('ProjectListPage', () => {
 
         fireEvent.change(targetInput, { target: { value: '80000' } })
         expect(targetInput.value).toBe('80000')
+    })
+
+    it('uses 10000-word increments for target length spinner', async () => {
+        useProjectStore.setState({ projects: [], loading: false })
+        renderPage()
+
+        await openCreateModal()
+        const dialog = screen.getByRole('dialog')
+        const targetInput = dialog.querySelector('input[type="number"]') as HTMLInputElement
+
+        expect(targetInput).toBeTruthy()
+        expect(targetInput).toHaveAttribute('step', '10000')
     })
 
     it('shows toast on successful project deletion', async () => {

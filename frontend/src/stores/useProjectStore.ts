@@ -29,6 +29,7 @@ export interface ProjectCreateForm {
     template_id?: string
     target_length: number
     taboo_constraints: string
+    synopsis?: string
 }
 
 export interface ChapterItem {
