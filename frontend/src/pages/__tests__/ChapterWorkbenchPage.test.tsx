@@ -65,6 +65,30 @@ const sampleChapterResolvedP0 = {
     ],
 }
 
+const reviewingChapter = {
+    ...sampleChapter,
+    status: 'reviewing',
+    conflicts: [{ id: 'cf-r1', severity: 'P1' as const, rule_id: 'R004', reason: '细节需确认' }],
+}
+
+const revisedChapter = {
+    ...sampleChapter,
+    status: 'revised',
+    conflicts: [],
+}
+
+const approvedChapter = {
+    ...sampleChapter,
+    status: 'approved',
+    conflicts: [],
+}
+
+const approvedChapterWithEmptyDraft = {
+    ...approvedChapter,
+    draft: '',
+    final: '',
+}
+
 const mockApiGet = vi.fn()
 const mockApiPost = vi.fn()
 const mockApiPut = vi.fn()
@@ -134,7 +158,7 @@ vi.mock('../../components/chapter/ChapterExportMenu', () => ({
 vi.mock('../../components/ui/ReadingModeToolbar', () => ({
     default: ({ onExit, currentLabel }: any) => (
         <div data-testid="reading-toolbar">
-            <button onClick={onExit}>退出阅读</button>
+            <button type="button" onClick={onExit}>退出阅读</button>
             <span>{currentLabel}</span>
         </div>
     ),
@@ -199,19 +223,16 @@ describe('ChapterWorkbenchPage', () => {
             expect(screen.getByText('删除本章')).toBeTruthy()
         })
         fireEvent.click(screen.getByText('删除本章'))
-        expect(screen.getByText('删除当前章节？')).toBeTruthy()
+        expect(screen.getByText('确认删除当前章节？')).toBeTruthy()
     })
 
-    it('一句话整篇字数输入允许清空后重输', async () => {
+    it('不再显示一句话整篇入口', async () => {
         renderPage()
         await waitFor(() => {
-            expect(screen.getByText('一句话整篇')).toBeTruthy()
+            expect(screen.getByText(/第 1 章 · 雪夜惊变/)).toBeTruthy()
         })
-        const wordInput = screen.getByDisplayValue('1600') as HTMLInputElement
-        fireEvent.change(wordInput, { target: { value: '' } })
-        expect(wordInput.value).toBe('')
-        fireEvent.change(wordInput, { target: { value: '2200' } })
-        expect(wordInput.value).toBe('2200')
+        expect(screen.queryByText('一句话整篇')).toBeNull()
+        expect(screen.queryByText('一句话生成整篇')).toBeNull()
     })
 
     it('显示决策回放链接', async () => {
@@ -346,7 +367,7 @@ describe('ChapterWorkbenchPage', () => {
         })
         expect(screen.queryByText('章节蓝图')).toBeNull()
         expect(screen.queryByText('一致性冲突')).toBeNull()
-        expect(screen.queryByText('流式生成草稿')).toBeNull()
+        expect(screen.queryByText('重做本章')).toBeNull()
     })
 
     it('阅读模式下点击退出调用 exitReadingMode', async () => {
@@ -537,21 +558,21 @@ describe('ChapterWorkbenchPage', () => {
         })
     })
 
-    it('有 P0 冲突时禁用审批通过按钮', async () => {
+    it('有 P0 冲突时禁用提交审批按钮', async () => {
         renderPage()
         await waitFor(() => {
-            expect(screen.getByRole('button', { name: '审批通过' })).toBeTruthy()
+            expect(screen.getByRole('button', { name: '提交审批' })).toBeTruthy()
         })
-        expect(screen.getByRole('button', { name: '审批通过' })).toHaveProperty('disabled', true)
+        expect(screen.getByRole('button', { name: '提交审批' })).toHaveProperty('disabled', true)
     })
 
-    it('全部 P0 已 resolved 时允许审批通过按钮可点击', async () => {
+    it('全部 P0 已 resolved 时允许提交审批按钮可点击', async () => {
         mockApiGet.mockResolvedValue({ data: sampleChapterResolvedP0 })
         renderPage()
         await waitFor(() => {
-            expect(screen.getByRole('button', { name: '审批通过' })).toBeTruthy()
+            expect(screen.getByRole('button', { name: '提交审批' })).toBeTruthy()
         })
-        expect(screen.getByRole('button', { name: '审批通过' })).toHaveProperty('disabled', false)
+        expect(screen.getByRole('button', { name: '提交审批' })).toHaveProperty('disabled', false)
     })
 
     it('审批遇到 P0 策略错误时显示精确提示', async () => {
@@ -559,9 +580,9 @@ describe('ChapterWorkbenchPage', () => {
         mockApiPost.mockRejectedValue({ response: { data: { detail: 'P0 conflicts must be resolved before approval' } } })
         renderPage()
         await waitFor(() => {
-            expect(screen.getByRole('button', { name: '审批通过' })).toBeTruthy()
+            expect(screen.getByRole('button', { name: '提交审批' })).toBeTruthy()
         })
-        fireEvent.click(screen.getByRole('button', { name: '审批通过' }))
+        fireEvent.click(screen.getByRole('button', { name: '提交审批' }))
         await waitFor(() => {
             expect(mockAddToast).toHaveBeenCalledWith('error', '需先解决 P0 冲突后再审批', expect.objectContaining({
                 context: '审批操作',
@@ -575,14 +596,65 @@ describe('ChapterWorkbenchPage', () => {
         mockApiPost.mockRejectedValue(new Error('网络错误'))
         renderPage()
         await waitFor(() => {
-            expect(screen.getByRole('button', { name: '审批通过' })).toBeTruthy()
+            expect(screen.getByRole('button', { name: '提交审批' })).toBeTruthy()
         })
-        fireEvent.click(screen.getByRole('button', { name: '审批通过' }))
+        fireEvent.click(screen.getByRole('button', { name: '提交审批' }))
         await waitFor(() => {
             expect(mockAddToast).toHaveBeenCalledWith('error', '提交审批失败', expect.objectContaining({
                 context: '审批操作',
                 detail: '网络错误',
             }))
+        })
+    })
+
+    it('已审批状态展示状态与流程提示，按钮显示为重新打开审核并可点击', async () => {
+        mockApiGet.mockResolvedValue({ data: approvedChapter })
+        renderPage()
+        await waitFor(() => {
+            expect(screen.getByText('当前状态：已审批')).toBeTruthy()
+            expect(screen.getByText('当前已审批：如需继续修改，请先重新打开审核。')).toBeTruthy()
+            expect(screen.getByRole('button', { name: '重新打开审核' })).toBeTruthy()
+        })
+        expect(screen.getByRole('button', { name: '重新打开审核' })).toHaveProperty('disabled', false)
+    })
+
+    it('已审批状态点击重新打开审核会调用 rescan 并提示成功', async () => {
+        mockApiGet.mockResolvedValue({ data: approvedChapter })
+        mockApiPost.mockResolvedValueOnce({ data: { status: 'reviewing', action: 'rescan' } })
+        renderPage()
+        await waitFor(() => {
+            expect(screen.getByRole('button', { name: '重新打开审核' })).toBeTruthy()
+        })
+        fireEvent.click(screen.getByRole('button', { name: '重新打开审核' }))
+        await waitFor(() => {
+            expect(mockApiPost).toHaveBeenCalledWith('/review', { chapter_id: 'ch-1', action: 'rescan' }, expect.any(Object))
+            expect(mockAddToast).toHaveBeenCalledWith('success', '已重新打开审核，可继续修改后再提交审批')
+        })
+    })
+
+    it('已审批且草稿为空时仍可重新打开审核', async () => {
+        mockApiGet.mockResolvedValue({ data: approvedChapterWithEmptyDraft })
+        renderPage()
+        await waitFor(() => {
+            expect(screen.getByRole('button', { name: '重新打开审核' })).toBeTruthy()
+        })
+        expect(screen.getByRole('button', { name: '重新打开审核' })).toHaveProperty('disabled', false)
+    })
+
+    it('待审核与已退回状态展示对应流程提示与统一主按钮', async () => {
+        mockApiGet.mockResolvedValueOnce({ data: reviewingChapter })
+        renderPage()
+        await waitFor(() => {
+            expect(screen.getByText('当前状态：待审核')).toBeTruthy()
+            expect(screen.getByText('下一步：先处理冲突项，再提交审批。')).toBeTruthy()
+            expect(screen.getByRole('button', { name: '提交审批' })).toBeTruthy()
+        })
+
+        mockApiGet.mockResolvedValueOnce({ data: revisedChapter })
+        renderPage()
+        await waitFor(() => {
+            expect(screen.getByText('当前状态：已退回')).toBeTruthy()
+            expect(screen.getByText('下一步：根据退回意见修改，完成后重新提交审批。')).toBeTruthy()
         })
     })
 
@@ -596,7 +668,7 @@ describe('ChapterWorkbenchPage', () => {
         })
     })
 
-    it('蓝图生成成功时触发 success Toast', async () => {
+    it('重新生成蓝图成功时触发 success Toast', async () => {
         mockApiPost.mockResolvedValue({ data: {} })
         renderPage()
         await waitFor(() => {
@@ -608,7 +680,7 @@ describe('ChapterWorkbenchPage', () => {
         })
     })
 
-    it('蓝图生成失败时触发 error Toast', async () => {
+    it('重新生成蓝图失败时触发 error Toast', async () => {
         mockApiPost.mockRejectedValue(new Error('后端错误'))
         renderPage()
         await waitFor(() => {
@@ -658,7 +730,7 @@ describe('ChapterWorkbenchPage', () => {
         expect(screen.getByText('保存编辑并重检')).toBeTruthy()
     })
 
-    it('清空创作台会清空终稿与侧通道，且不触发保存接口', async () => {
+    it('不再提供清空创作台入口', async () => {
         mockApiGet.mockImplementation((url: string) => {
             if (url === '/chapters/ch-1') {
                 return Promise.resolve({ data: sampleChapter })
@@ -679,88 +751,59 @@ describe('ChapterWorkbenchPage', () => {
 
         renderPage()
         await waitFor(() => {
-            expect(screen.getByText('清空创作台')).toBeTruthy()
+            expect(screen.getByText('保存编辑并重检')).toBeTruthy()
         })
-
-        const editor = document.querySelector('textarea[rows="22"]') as HTMLTextAreaElement
-        expect(editor).toBeTruthy()
-        fireEvent.change(editor, { target: { value: '临时编辑内容' } })
-        expect(editor.value).toBe('临时编辑内容')
-
-        fireEvent.click(screen.getByText('导演'))
-        expect(await screen.findByText('导演阶段待办')).toBeTruthy()
-
-        fireEvent.click(screen.getByText('清空创作台'))
-        expect(screen.getByText('清空当前创作台？')).toBeTruthy()
-        fireEvent.click(screen.getByText('确认清空'))
-
-        const clearedEditor = document.querySelector('textarea[rows="22"]') as HTMLTextAreaElement
-        expect(clearedEditor.value).toBe('')
-
-        fireEvent.click(screen.getByText('导演'))
-        expect(await screen.findByText('等待该阶段输出...')).toBeTruthy()
-        expect(screen.queryByText('导演阶段待办')).toBeNull()
-
-        expect(mockApiPut).not.toHaveBeenCalled()
+        expect(screen.queryByText('清空创作台')).toBeNull()
+        expect(screen.queryByText('清空当前创作台？')).toBeNull()
     })
 
-    it('流式生成完成后会清理本地草稿，避免弹出恢复对话框', async () => {
-        const originalEventSource = (globalThis as any).EventSource
-        const sources: any[] = []
-
-        class MockEventSource {
-            onerror: any = null
-            private listeners = new Map<string, Array<(event: MessageEvent) => void>>()
-
-            constructor(_url: string) {
-                sources.push(this)
-            }
-
-            addEventListener(type: string, listener: (event: MessageEvent) => void) {
-                const list = this.listeners.get(type) || []
-                list.push(listener)
-                this.listeners.set(type, list)
-            }
-
-            close() {
-                return undefined
-            }
-
-            emit(type: string, payload: unknown) {
-                const list = this.listeners.get(type) || []
-                const event = { data: JSON.stringify(payload) } as MessageEvent
-                for (const listener of list) {
-                    listener(event)
+    it('重做本章完成后会清理本地草稿，避免弹出恢复对话框', async () => {
+        const frames = [
+            'event: chunk\ndata: {"chunk":"流式正文片段"}\n\n',
+            'event: done\ndata: {"consistency":{"can_submit":true,"conflicts":[]},"chapter":{"id":"ch-1"}}\n\n',
+        ]
+        const encoder = new TextEncoder()
+        let index = 0
+        const stream = new ReadableStream<Uint8Array>({
+            pull(controller) {
+                if (index < frames.length) {
+                    controller.enqueue(encoder.encode(frames[index]))
+                    index += 1
+                    return
                 }
-            }
-        }
+                controller.close()
+            },
+        })
+        const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+            ok: true,
+            status: 200,
+            body: stream,
+            text: async () => '',
+        } as unknown as Response)
 
-        (globalThis as any).EventSource = MockEventSource as any
+        renderPage()
+        await waitFor(() => {
+            expect(screen.getByText('重做本章')).toBeTruthy()
+        })
 
-        try {
-            renderPage()
-            await waitFor(() => {
-                expect(screen.getByText('流式生成草稿')).toBeTruthy()
-            })
+        localStorageMock.removeItem.mockClear()
 
-            localStorageMock.removeItem.mockClear()
+        fireEvent.change(screen.getByPlaceholderText(/描述你想怎么改这一章/), {
+            target: { value: '把背叛改成暗中保护的误会' },
+        })
+        fireEvent.click(screen.getByText('重做本章'))
 
-            fireEvent.click(screen.getByText('流式生成草稿'))
-            expect(sources.length).toBeGreaterThan(0)
+        await waitFor(() => {
+            expect(fetchSpy).toHaveBeenCalledTimes(1)
+        })
+        expect(fetchSpy.mock.calls[0]?.[0]).toBe('/api/chapters/ch-1/one-shot/stream')
 
-            const source = sources[0]
-            source.emit('chunk', { channel: 'arbiter', chunk: '流式正文片段' })
-            source.emit('done', { consistency: { can_submit: true, conflicts: [] } })
+        await waitFor(() => {
+            expect(mockAddToast).toHaveBeenCalledWith('success', '本章重做完成')
+        })
 
-            await waitFor(() => {
-                expect(mockAddToast).toHaveBeenCalledWith('success', '草稿生成完成')
-            })
-
-            expect(localStorageMock.removeItem).toHaveBeenCalledWith('draft-ch-1')
-            expect(screen.queryByText('发现本地草稿')).toBeNull()
-        } finally {
-            (globalThis as any).EventSource = originalEventSource
-        }
+        expect(localStorageMock.removeItem).toHaveBeenCalledWith('draft-ch-1')
+        expect(screen.queryByText('发现本地草稿')).toBeNull()
     })
 
     it('保存草稿成功时触发 success Toast', async () => {
@@ -781,6 +824,67 @@ describe('ChapterWorkbenchPage', () => {
         await waitFor(() => {
             expect(mockFetchChapters).toHaveBeenCalledWith('proj-1')
         })
+    })
+
+    it('保留修改方向输入并用于重新生成蓝图', async () => {
+        renderPage()
+        await waitFor(() => {
+            expect(screen.getByPlaceholderText(/描述你想怎么改这一章/)).toBeTruthy()
+        })
+
+        fireEvent.change(screen.getByPlaceholderText(/描述你想怎么改这一章/), {
+            target: { value: '把背叛改成暗中保护的误会' },
+        })
+        fireEvent.click(screen.getByText('重新生成蓝图'))
+
+        await waitFor(() => {
+            expect(mockApiPost).toHaveBeenCalledWith(
+                '/chapters/ch-1/plan',
+                { direction_hint: '把背叛改成暗中保护的误会' },
+                expect.any(Object),
+            )
+        })
+    })
+
+    it('保留重做本章按钮并移除流式生成草稿入口', async () => {
+        renderPage()
+        await waitFor(() => {
+            expect(screen.getByText('重做本章')).toBeTruthy()
+        })
+
+        expect(screen.queryByText('流式生成草稿')).toBeNull()
+        expect(screen.queryByText('继续流式生成')).toBeNull()
+    })
+
+    it('不再提供删除并重建同编号入口', async () => {
+        renderPage()
+        await waitFor(() => {
+            expect(screen.getByText('删除本章')).toBeTruthy()
+        })
+
+        fireEvent.click(screen.getByText('删除本章'))
+
+        await waitFor(() => {
+            expect(screen.getByText('确认删除当前章节？')).toBeTruthy()
+        })
+
+        expect(screen.queryByText('删除并重建同编号')).toBeNull()
+    })
+
+    it('存在后续章节时显示重做本章衔接风险提示', async () => {
+        mockStoreChapters.splice(
+            0,
+            mockStoreChapters.length,
+            { id: 'ch-1', chapter_number: 1, title: '雪夜惊变', goal: '', status: 'draft', word_count: 18, conflict_count: 1 },
+            { id: 'ch-2', chapter_number: 2, title: '第二章', goal: '后续章节', status: 'draft', word_count: 1200, conflict_count: 0 },
+        )
+        renderPage()
+
+        await waitFor(() => {
+            expect(screen.getByText('重做本章')).toBeTruthy()
+        })
+
+        expect(screen.getByText(/后续章节已存在，重做本章可能导致与后续章节的衔接出现不一致/)).toBeTruthy()
     })
 
     /* ── 自动保存集成 ── */

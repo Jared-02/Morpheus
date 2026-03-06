@@ -79,22 +79,15 @@ interface Chapter {
     conflicts: Conflict[]
 }
 
-interface StreamDonePayload {
-    consistency?: {
-        can_submit: boolean
-        conflicts: Conflict[]
-    }
+const chapterStatusMeta: Record<string, { label: string; hint: string }> = {
+    draft: { label: '草稿中', hint: '下一步：完善正文并保存，保存后可进入审核。' },
+    reviewing: { label: '待审核', hint: '下一步：先处理冲突项，再提交审批。' },
+    revised: { label: '已退回', hint: '下一步：根据退回意见修改，完成后重新提交审批。' },
+    approved: { label: '已审批', hint: '当前已审批：如需继续修改，请先重新打开审核。' },
 }
 
 type StreamChannel = 'arbiter' | 'director' | 'setter' | 'stylist'
 type StreamSideChannelText = Record<'director' | 'setter' | 'stylist', string>
-
-interface StreamMetaPayload {
-    start?: number
-    cached?: boolean
-    replay_source?: 'trace' | 'chapter'
-    available_channels?: StreamChannel[]
-}
 
 interface TraceDecisionPayload {
     agent_role?: string
@@ -140,8 +133,6 @@ function buildStreamSideChannelText(trace?: TracePayload | null): StreamSideChan
     }
     return base
 }
-
-type OneShotMode = 'studio' | 'quick' | 'cinematic'
 
 type BlueprintDetailItem = {
     title: string
@@ -312,12 +303,6 @@ export default function ChapterWorkbenchPage() {
         setter: '',
         stylist: '',
     })
-    const [oneShotPrompt, setOneShotPrompt] = useState('')
-    const [oneShotMode, setOneShotMode] = useState<OneShotMode>('studio')
-    const [oneShotWords, setOneShotWords] = useState(1600)
-    const [oneShotWordsInput, setOneShotWordsInput] = useState('1600')
-    const [oneShotLoading, setOneShotLoading] = useState(false)
-    const [oneShotStage, setOneShotStage] = useState<{ id: string; label: string } | null>(null)
     const [loadingPlan, setLoadingPlan] = useState(false)
     const [streaming, setStreaming] = useState(false)
     const [streamingStage, setStreamingStage] = useState<string | null>(null)
@@ -347,15 +332,15 @@ export default function ChapterWorkbenchPage() {
     const [showDraftRestore, setShowDraftRestore] = useState(false)
     const [showRejectConfirm, setShowRejectConfirm] = useState(false)
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
-    const [showClearWorkspaceConfirm, setShowClearWorkspaceConfirm] = useState(false)
     const [deletingChapter, setDeletingChapter] = useState(false)
+    const [directionHint, setDirectionHint] = useState('')
 
     const activeStreamText = streamChannel === 'arbiter'
         ? draftContent
         : streamChannelText[streamChannel]
     const canEditDraft = streamChannel === 'arbiter'
     const emptyStreamText = streamChannel === 'arbiter'
-        ? '点击"流式生成草稿"开始创作。'
+        ? '当前暂无正文，请先在创作控制台生成，或基于已有内容在此继续修改。'
         : '等待该阶段输出...'
 
     /* ── 加载章节 ── */
@@ -365,8 +350,6 @@ export default function ChapterWorkbenchPage() {
             const response = await api.get(`/chapters/${chapterId}`)
             setChapter(response.data)
             setDraftContent(response.data.draft ?? response.data.final ?? '')
-            setOneShotPrompt((prev) => prev || response.data.goal || '')
-
             try {
                 const traceResponse = await api.get(`/trace/${chapterId}`)
                 setStreamChannelText(buildStreamSideChannelText(traceResponse.data as TracePayload))
@@ -405,8 +388,9 @@ export default function ChapterWorkbenchPage() {
             }
             fetchChapters(projectId)
         }
+        const currentSource = eventSourceRef.current
         return () => {
-            eventSourceRef.current?.close()
+            currentSource?.close()
         }
     }, [chapterId, projectId, loadChapter, fetchChapters, fetchProject])
 
@@ -483,6 +467,23 @@ export default function ChapterWorkbenchPage() {
         () => (chapter?.conflicts || []).filter((c) => c.severity === 'P2'),
         [chapter],
     )
+
+    const isGenerating = streaming
+    const statusKey = String(chapter?.status || 'draft').toLowerCase()
+    const statusMeta = chapterStatusMeta[statusKey] || chapterStatusMeta.draft
+    const isApproved = statusKey === 'approved'
+    const canApproveDraft = !isGenerating && p0Conflicts.length === 0 && (!!draftContent.trim() || isApproved)
+    const canSubmitApproval = isApproved ? !isGenerating : canApproveDraft
+    const primaryActionLabel = isApproved ? '重新打开审核' : '提交审批'
+    const primaryActionReason = isApproved
+        ? isGenerating
+            ? '正在生成中，请等待完成或停止当前任务'
+            : '当前章节已审批，如需修改请先重新打开审核'
+        : p0Conflicts.length > 0
+            ? '存在 P0 冲突，请先解决后再审批'
+            : !draftContent.trim()
+                ? '无草稿内容'
+                : '正在生成中，请等待完成或停止当前任务'
 
     const blueprintBeats = useMemo(
         () => (chapter?.plan?.beats || []).map(cleanBlueprintText).filter(Boolean),
@@ -584,7 +585,11 @@ export default function ChapterWorkbenchPage() {
         if (!chapterId) return
         setLoadingPlan(true)
         try {
-            const response = await api.post(`/chapters/${chapterId}/plan`, null, { timeout: LLM_TIMEOUT })
+            const response = await api.post(
+                `/chapters/${chapterId}/plan`,
+                { direction_hint: directionHint.trim() || undefined },
+                { timeout: LLM_TIMEOUT },
+            )
             const quality = response?.data?.quality as PlanQuality | undefined
             const qualityDebug = response?.data?.quality_debug as PlanQualityDebug | undefined
             if (response?.data?.plan) {
@@ -620,120 +625,86 @@ export default function ChapterWorkbenchPage() {
         }
     }
 
-    const startDraftStream = (force: boolean, resume: boolean) => {
+    const redoDraft = async () => {
         if (!chapterId) return
+        if (!chapter) return
         setStreaming(true)
         setStreamChannel('arbiter')
         setShowDraftRestore(false)
-        const startOffset = resume ? draftContent.length : 0
-        if (force && !resume) {
-            setDraftContent('')
-            setStreamChannelText({ director: '', setter: '', stylist: '' })
-        }
+        setDraftContent('')
+        setStreamChannelText({ director: '', setter: '', stylist: '' })
 
-        eventSourceRef.current?.close()
-        const params = new URLSearchParams({
-            force: force ? 'true' : 'false',
-            resume_from: String(startOffset),
-        })
-
-        const source = new EventSource(`/api/chapters/${chapterId}/draft/stream?${params.toString()}`)
-        eventSourceRef.current = source
-
-        source.addEventListener('meta', (event) => {
-            const payload = JSON.parse((event as MessageEvent).data) as StreamMetaPayload
-            const replayStart = Number(payload.start || 0)
-            const hasSideReplay = (payload.available_channels || []).some((channel) => channel !== 'arbiter')
-            if (payload.cached && payload.replay_source === 'trace' && replayStart === 0 && hasSideReplay) {
-                setDraftContent('')
-                setStreamChannelText({ director: '', setter: '', stylist: '' })
-            }
-        })
-
-        source.addEventListener('stage', (event) => {
-            try {
-                const payload = JSON.parse((event as MessageEvent).data)
-                setStreamingStage(payload.label || payload.stage)
-            } catch { /* ignore */ }
-        })
-
-        source.addEventListener('chunk', (event) => {
-            const payload = JSON.parse((event as MessageEvent).data) as { chunk: string; channel?: StreamChannel }
-            const channel = payload.channel || 'arbiter'
-            if (channel === 'arbiter') {
-                setDraftContent((prev) => prev + payload.chunk)
-                return
-            }
-            if (channel === 'director' || channel === 'setter' || channel === 'stylist') {
-                setStreamChannelText((prev) => ({
-                    ...prev,
-                    [channel]: `${prev[channel]}${payload.chunk}`,
-                }))
-            }
-        })
-
-        source.addEventListener('error', (event) => {
-            const payload = JSON.parse((event as MessageEvent).data) as { detail?: string }
-            source.close()
-            setStreaming(false)
-            addToast('error', '流式生成失败', {
-                context: '流式生成',
-                actions: [
-                    { label: '继续生成', onClick: () => startDraftStream(false, true) },
-                    { label: '重新开始', onClick: () => startDraftStream(true, false) },
-                ],
-                detail: payload?.detail || '流式生成失败',
+        const controller = new AbortController()
+        try {
+            const response = await fetch(`/api/chapters/${chapterId}/one-shot/stream`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    prompt: directionHint.trim() || chapter.goal,
+                    mode: 'studio',
+                    target_words: 1600,
+                    override_goal: true,
+                    rewrite_plan: true,
+                }),
+                signal: controller.signal,
             })
-            addRecord({ type: 'generate', description: '流式生成失败', status: 'error', retryAction: () => startDraftStream(false, true) })
-        })
+            if (!response.ok || !response.body) {
+                const detail = await response.text()
+                throw new Error(detail || `HTTP ${response.status}`)
+            }
 
-        source.addEventListener('done', async (event) => {
-            const payload = JSON.parse((event as MessageEvent).data) as StreamDonePayload
-            source.close()
-            clearLocalDraft()
-            setShowDraftRestore(false)
+            const reader = response.body.getReader()
+            const decoder = new TextDecoder('utf-8')
+            let buffer = ''
+            while (true) {
+                const { value, done } = await reader.read()
+                if (done) break
+                buffer += decoder.decode(value, { stream: true })
+                const frames = buffer.split('\n\n')
+                buffer = frames.pop() || ''
+                for (const frame of frames) {
+                    const lines = frame.split('\n').map((line) => line.trim()).filter(Boolean)
+                    let eventName = 'message'
+                    const dataLines: string[] = []
+                    for (const line of lines) {
+                        if (line.startsWith('event:')) eventName = line.slice(6).trim()
+                        else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim())
+                    }
+                    const raw = dataLines.join('\n')
+                    if (!raw) continue
+                    const payload = JSON.parse(raw)
+                    if (eventName === 'stage') {
+                        setStreamingStage(payload.label || payload.stage)
+                        continue
+                    }
+                    if (eventName === 'chunk') {
+                        setDraftContent((prev) => prev + String(payload.chunk || ''))
+                        continue
+                    }
+                    if (eventName === 'done') {
+                        clearLocalDraft()
+                        setShowDraftRestore(false)
+                        setStreaming(false)
+                        setStreamingStage(null)
+                        await loadChapter()
+                        addToast('success', '本章重做完成')
+                        addRecord({ type: 'generate', description: '本章重做完成', status: 'success' })
+                        return
+                    }
+                    if (eventName === 'error') {
+                        throw new Error(payload.detail || '本章重做失败')
+                    }
+                }
+            }
+        } catch (err: any) {
             setStreaming(false)
             setStreamingStage(null)
-            if (payload.consistency && chapter) {
-                setChapter({
-                    ...chapter,
-                    conflicts: payload.consistency.conflicts ?? chapter.conflicts,
-                    status: payload.consistency.can_submit ? 'reviewing' : chapter.status,
-                })
-            }
-            await loadChapter()
-            addToast('success', '草稿生成完成')
-            addRecord({ type: 'generate', description: '草稿生成完成', status: 'success' })
-        })
-
-        source.addEventListener('error', (event) => {
-            try {
-                const payload = JSON.parse((event as MessageEvent).data)
-                source.close()
-                setStreaming(false)
-                setStreamingStage(null)
-                addToast('error', payload.detail || '草稿生成失败', {
-                    context: '流式生成',
-                    actions: [{ label: '重试', onClick: () => startDraftStream(true, false) }],
-                })
-                addRecord({ type: 'generate', description: '草稿生成失败', status: 'error', retryAction: () => startDraftStream(true, false) })
-            } catch {
-                // Not a business error event, let onerror handle it
-            }
-        })
-
-        source.onerror = () => {
-            source.close()
-            setStreaming(false)
-            setStreamingStage(null)
-            addToast('error', '流式生成中断', {
-                context: '流式生成',
-                actions: [
-                    { label: '继续生成', onClick: () => startDraftStream(false, true) },
-                    { label: '重新开始', onClick: () => startDraftStream(true, false) },
-                ],
+            addToast('error', '本章重做失败', {
+                context: '章节重做',
+                detail: err?.message,
+                actions: [{ label: '重试', onClick: () => void redoDraft() }],
             })
-            addRecord({ type: 'generate', description: '流式生成中断', status: 'error', retryAction: () => startDraftStream(false, true) })
+            addRecord({ type: 'generate', description: '本章重做失败', status: 'error', retryAction: () => void redoDraft() })
         }
     }
 
@@ -755,6 +726,29 @@ export default function ChapterWorkbenchPage() {
                 detail,
             })
             addRecord({ type: 'approve', description: '审批操作失败', status: 'error', retryAction: () => void reviewDraft(action) })
+        }
+    }
+
+    const reopenReview = async () => {
+        if (!chapterId) return
+        try {
+            await api.post('/review', { chapter_id: chapterId, action: 'rescan' }, { timeout: LLM_TIMEOUT })
+            await loadChapter()
+            addToast('success', '已重新打开审核，可继续修改后再提交审批')
+            addRecord({ type: 'approve', description: '重新打开审核', status: 'success' })
+        } catch (err: any) {
+            console.error(err)
+            addToast('error', '重新打开审核失败', {
+                context: '审批操作',
+                actions: [{ label: '重试', onClick: () => void reopenReview() }],
+                detail: err?.response?.data?.detail || err?.message,
+            })
+            addRecord({
+                type: 'approve',
+                description: '重新打开审核失败',
+                status: 'error',
+                retryAction: () => void reopenReview(),
+            })
         }
     }
 
@@ -787,113 +781,6 @@ export default function ChapterWorkbenchPage() {
             addRecord({ type: 'save', description: '草稿保存失败', status: 'error', retryAction: () => void saveDraft() })
         } finally {
             setSavingDraft(false)
-        }
-    }
-
-    const oneShotAbortRef = useRef<AbortController | null>(null)
-
-    const generateOneShot = async () => {
-        if (!chapterId || !oneShotPrompt.trim()) return
-        setOneShotLoading(true)
-        setDraftContent('')
-
-        const controller = new AbortController()
-        oneShotAbortRef.current = controller
-
-        try {
-            const res = await fetch(`/api/chapters/${chapterId}/one-shot/stream`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    prompt: oneShotPrompt.trim(),
-                    mode: oneShotMode,
-                    target_words: oneShotWords,
-                    override_goal: true,
-                    rewrite_plan: true,
-                }),
-                signal: controller.signal,
-            })
-
-            if (!res.ok) {
-                const text = await res.text()
-                throw new Error(text || `HTTP ${res.status}`)
-            }
-
-            if (!res.body) throw new Error('No response body')
-
-            const reader = res.body.getReader()
-            const decoder = new TextDecoder('utf-8')
-            let buffer = ''
-            let receivedChunk = false
-
-            while (true) {
-                if (controller.signal.aborted) {
-                    await reader.cancel()
-                    break
-                }
-                const { value, done: readerDone } = await reader.read()
-                if (readerDone) break
-                buffer += decoder.decode(value, { stream: true })
-                const frames = buffer.split('\n\n')
-                buffer = frames.pop() || ''
-
-                for (const frame of frames) {
-                    const lines = frame.split('\n').map((l: string) => l.trim()).filter(Boolean)
-                    if (lines.length === 0) continue
-                    let eventName = 'message'
-                    const dataLines: string[] = []
-                    for (const line of lines) {
-                        if (line.startsWith('event:')) eventName = line.slice(6).trim()
-                        else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim())
-                    }
-                    const raw = dataLines.join('\n')
-                    if (!raw) continue
-
-                    if (eventName === 'heartbeat') continue
-
-                    let payload: any = {}
-                    try { payload = JSON.parse(raw) } catch { continue }
-
-                    if (eventName === 'stage') {
-                        setOneShotStage({ id: payload.stage, label: payload.label })
-                        continue
-                    }
-
-                    if (eventName === 'chunk') {
-                        receivedChunk = true
-                        setDraftContent((prev) => prev + (payload.chunk || ''))
-                    } else if (eventName === 'done') {
-                        setOneShotStage(null)
-                        if (payload.chapter) {
-                            setChapter(payload.chapter)
-                        }
-                        if (!receivedChunk && payload.draft) {
-                            setDraftContent(payload.draft)
-                        }
-                        await loadChapter()
-                        addToast('success', '一句话整篇生成完成')
-                    } else if (eventName === 'error') {
-                        throw new Error(payload.detail || '一句话整篇生成失败')
-                    }
-                }
-            }
-            clearLocalDraft()
-            setShowDraftRestore(false)
-            addToast('success', '一句话整篇生成完成')
-        } catch (err: any) {
-            setOneShotStage(null)
-            if (controller.signal.aborted) {
-                addToast('info', '一句话整篇已取消')
-            } else {
-                console.error(err)
-                addToast('error', err?.message ?? '一句话整篇生成失败', {
-                    context: '一句话整篇',
-                    actions: [{ label: '重试', onClick: () => void generateOneShot() }],
-                })
-            }
-        } finally {
-            setOneShotLoading(false)
-            oneShotAbortRef.current = null
         }
     }
 
@@ -1002,22 +889,6 @@ export default function ChapterWorkbenchPage() {
         }
     }
 
-    const clearWorkspaceLocally = () => {
-        setDraftContent('')
-        setStreamChannelText({
-            director: '',
-            setter: '',
-            stylist: '',
-        })
-        setStreamChannel('arbiter')
-        setOneShotPrompt('')
-        setEditing(true)
-        autoSave.clearDraft()
-        setShowDraftRestore(false)
-        addToast('success', '创作台已清空（仅本地，不影响已保存章节）')
-        addRecord({ type: 'save', description: '清空创作台（仅本地）', status: 'success' })
-    }
-
     const fillFanqieFormWithLLM = async () => {
         if (!projectId) return
         setFillingFanqieByLLM(true)
@@ -1067,7 +938,12 @@ export default function ChapterWorkbenchPage() {
         }
     }
 
-    const handleDeleteChapter = async (recreate: boolean) => {
+    const hasLaterChapters = useMemo(
+        () => storeChapters.some((item) => item.chapter_number > (chapter?.chapter_number || 0)),
+        [storeChapters, chapter?.chapter_number],
+    )
+
+    const handleDeleteChapter = async () => {
         if (!chapter || !chapterId || !projectId) return
         setDeletingChapter(true)
         const snapshot = {
@@ -1077,36 +953,15 @@ export default function ChapterWorkbenchPage() {
         }
         try {
             await deleteChapterRequest(chapterId)
-            if (recreate) {
-                const created = await api.post('/chapters', {
-                    project_id: projectId,
-                    chapter_number: snapshot.chapter_number,
-                    title: snapshot.title,
-                    goal: snapshot.goal,
-                })
-                const newChapterId = created?.data?.id
-                if (!newChapterId) {
-                    throw new Error('章节重建失败：缺少新章节 ID')
-                }
-                if (projectId) {
-                    invalidateCache('project', projectId)
-                    invalidateCache('chapters', projectId)
-                    await fetchChapters(projectId, { force: true })
-                }
-                addToast('success', `第 ${snapshot.chapter_number} 章已重建`)
-                addRecord({ type: 'delete', description: `删除并重建章节: ${snapshot.title}`, status: 'success' })
-                navigate(`/project/${projectId}/chapter/${newChapterId}`)
-            } else {
-                if (projectId) {
-                    invalidateCache('project', projectId)
-                    invalidateCache('chapters', projectId)
-                }
-                addToast('success', `第 ${snapshot.chapter_number} 章已删除`)
-                addRecord({ type: 'delete', description: `删除章节: ${snapshot.title}`, status: 'success' })
-                navigate(`/project/${projectId}`)
+            if (projectId) {
+                invalidateCache('project', projectId)
+                invalidateCache('chapters', projectId)
             }
+            addToast('success', `第 ${snapshot.chapter_number} 章已删除`)
+            addRecord({ type: 'delete', description: `删除章节: ${snapshot.title}`, status: 'success' })
+            navigate(`/project/${projectId}`)
         } catch (error: any) {
-            addToast('error', recreate ? '删除并重建失败' : '删除章节失败', {
+            addToast('error', '删除章节失败', {
                 context: '章节删除',
                 detail: error?.response?.data?.detail || error?.message,
                 actions: [
@@ -1118,7 +973,7 @@ export default function ChapterWorkbenchPage() {
                     },
                 ],
             })
-            addRecord({ type: 'delete', description: recreate ? '删除并重建失败' : '删除章节失败', status: 'error' })
+            addRecord({ type: 'delete', description: '删除章节失败', status: 'error' })
         } finally {
             setDeletingChapter(false)
             setShowDeleteConfirm(false)
@@ -1539,10 +1394,23 @@ export default function ChapterWorkbenchPage() {
                                     </div>
                                 </div>
                             )}
-                            <div style={{ marginTop: 12 }}>
-                                <button className="btn btn-secondary" onClick={generatePlan} disabled={loadingPlan || streaming}>
+                            <div style={{ marginTop: 12, display: 'grid', gap: 10 }}>
+                                <div>
+                                    <div className="metric-label" style={{ marginBottom: 6 }}>修改方向（可选）</div>
+                                    <textarea
+                                        className="textarea"
+                                        rows={3}
+                                        placeholder="描述你想怎么改这一章，如：把背叛改成暗中保护的误会"
+                                        value={directionHint}
+                                        onChange={(e) => setDirectionHint(e.target.value)}
+                                        disabled={loadingPlan || streaming}
+                                    />
+                                </div>
+                                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                                    <button type="button" className="btn btn-secondary" onClick={generatePlan} disabled={loadingPlan || streaming}>
                                     {loadingPlan ? '生成中...' : chapter.plan ? '重新生成蓝图' : '生成蓝图'}
-                                </button>
+                                    </button>
+                                </div>
                             </div>
                         </section>
 
@@ -1582,144 +1450,21 @@ export default function ChapterWorkbenchPage() {
                         </div>
 
                         <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                            {/* 一句话整篇 */}
-                            <div className="card-strong" style={{ width: '100%', padding: 10, marginBottom: 4 }}>
-                                <div className="metric-label" style={{ marginBottom: 6 }}>一句话整篇</div>
-                                <textarea
-                                    className="textarea"
-                                    rows={3}
-                                    placeholder="输入一句话梗概，例如：雪夜里主角被同伴背叛后设局反杀。"
-                                    value={oneShotPrompt}
-                                    onChange={(e) => setOneShotPrompt(e.target.value)}
-                                    disabled={streaming || oneShotLoading}
-                                />
-                                <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
-                                    <select
-                                        className="input"
-                                        value={oneShotMode}
-                                        onChange={(e) => setOneShotMode(e.target.value as OneShotMode)}
-                                        disabled={streaming || oneShotLoading}
-                                        style={{ width: 170 }}
-                                    >
-                                        <option value="studio">Studio 多Agent</option>
-                                        <option value="quick">Quick 极速</option>
-                                        <option value="cinematic">Cinematic 电影感</option>
-                                    </select>
-                                    <input
-                                        className="input"
-                                        type="number"
-                                        min={300}
-                                        max={12000}
-                                        value={oneShotWordsInput}
-                                        onChange={(e) => {
-                                            const raw = e.target.value
-                                            if (!/^\d*$/.test(raw)) return
-                                            setOneShotWordsInput(raw)
-                                            if (!raw) return
-                                            const parsed = Number(raw)
-                                            if (Number.isFinite(parsed)) {
-                                                setOneShotWords(parsed)
-                                            }
-                                        }}
-                                        onBlur={() => {
-                                            if (!oneShotWordsInput.trim()) {
-                                                setOneShotWordsInput(String(oneShotWords))
-                                                return
-                                            }
-                                            const parsed = Number(oneShotWordsInput)
-                                            if (!Number.isFinite(parsed)) {
-                                                setOneShotWordsInput(String(oneShotWords))
-                                                return
-                                            }
-                                            const normalized = Math.max(300, Math.min(12000, parsed))
-                                            setOneShotWords(normalized)
-                                            setOneShotWordsInput(String(normalized))
-                                        }}
-                                        disabled={streaming || oneShotLoading}
-                                        style={{ width: 130 }}
-                                    />
-                                    <button
-                                        className="btn btn-primary"
-                                        onClick={generateOneShot}
-                                        disabled={streaming || oneShotLoading || !oneShotPrompt.trim()}
-                                    >
-                                        {oneShotLoading
-                                            ? (oneShotStage ? oneShotStage.label : '整篇生成中...')
-                                            : '一句话生成整篇'}
-                                    </button>
-                                </div>
-                                {oneShotLoading && (() => {
-                                    const studioSteps = [
-                                        { id: 'plan', label: '蓝图' },
-                                        { id: 'director', label: '导演' },
-                                        { id: 'setter', label: '审校' },
-                                        { id: 'stylist', label: '润色' },
-                                        { id: 'arbiter', label: '终稿' },
-                                        { id: 'consistency', label: '检查' },
-                                    ]
-                                    const quickSteps = [
-                                        { id: 'plan', label: '蓝图' },
-                                        { id: 'draft_streaming', label: '生成' },
-                                        { id: 'consistency', label: '检查' },
-                                    ]
-                                    const steps = oneShotMode === 'studio' ? studioSteps : quickSteps
-                                    const currentIdx = oneShotStage
-                                        ? steps.findIndex((s) => s.id === oneShotStage.id)
-                                        : -1
-                                    return (
-                                        <div style={{ display: 'flex', gap: 0, marginTop: 8, width: '100%' }}>
-                                            {steps.map((step, i) => {
-                                                const status = i < currentIdx ? 'completed' : i === currentIdx ? 'active' : 'pending'
-                                                return (
-                                                    <div
-                                                        key={step.id}
-                                                        style={{
-                                                            flex: 1,
-                                                            textAlign: 'center',
-                                                            padding: '4px 0',
-                                                            fontSize: 11,
-                                                            fontWeight: status === 'active' ? 700 : 400,
-                                                            color: status === 'pending' ? 'var(--text-muted, #888)' : status === 'active' ? 'var(--accent, #4f8cff)' : 'var(--text-secondary, #aaa)',
-                                                            borderBottom: `2px solid ${status === 'active' ? 'var(--accent, #4f8cff)' : status === 'completed' ? 'var(--success, #52c41a)' : 'var(--border, #333)'}`,
-                                                            transition: 'all 0.3s',
-                                                        }}
-                                                    >
-                                                        {status === 'completed' ? `✓ ${step.label}` : step.label}
-                                                    </div>
-                                                )
-                                            })}
-                                        </div>
-                                    )
-                                })()}
-                            </div>
-
                             {!chapter.plan && (
-                                <button className="btn btn-secondary" onClick={generatePlan} disabled={loadingPlan || streaming}>
+                                <button type="button" className="btn btn-secondary" onClick={generatePlan} disabled={loadingPlan || streaming}>
                                     先生成蓝图
                                 </button>
                             )}
                             <DisabledTooltip reason="正在生成中，请等待完成或停止当前任务" disabled={streaming}>
-                                <button className="btn btn-primary" disabled={streaming} onClick={() => startDraftStream(true, false)}>
-                                    {streaming ? (streamingStage || '流式生成中...') : '流式生成草稿'}
+                                <button type="button" className="btn btn-primary" disabled={streaming} onClick={() => void redoDraft()}>
+                                    {streaming ? (streamingStage || '重做中...') : '重做本章'}
                                 </button>
                             </DisabledTooltip>
-                            {draftContent.length > 0 && (
-                                <button className="btn btn-secondary" disabled={streaming} onClick={() => startDraftStream(false, true)}>
-                                    继续流式生成
-                                </button>
-                            )}
-                            <button className="btn btn-secondary" onClick={() => setEditing((s) => !s)}>
+                            <button type="button" className="btn btn-secondary" onClick={() => setEditing((s) => !s)}>
                                 {editing ? '预览正文' : '返回编辑'}
                             </button>
-                            <button className="btn btn-secondary" disabled={savingDraft || streaming} onClick={saveDraft}>
+                            <button type="button" className="btn btn-secondary" disabled={savingDraft || streaming} onClick={saveDraft}>
                                 {savingDraft ? '保存中...' : '保存编辑并重检'}
-                            </button>
-                            <button
-                                className="btn btn-secondary"
-                                disabled={streaming || (!draftContent.trim() && !oneShotPrompt.trim())}
-                                onClick={() => setShowClearWorkspaceConfirm(true)}
-                            >
-                                清空创作台
                             </button>
                             {editing && autoSave.lastSaved && (
                                 <span className="muted" style={{ fontSize: '0.8rem', alignSelf: 'center' }}>
@@ -1757,6 +1502,15 @@ export default function ChapterWorkbenchPage() {
                             </button>
                         </div>
 
+                        {hasLaterChapters && (
+                            <div className="card-strong" style={{ marginTop: 12, padding: '10px 12px' }}>
+                                <div className="metric-label" style={{ color: 'var(--warning, #faad14)' }}>重做本章衔接风险</div>
+                                <div className="muted" style={{ marginTop: 4, fontSize: '0.84rem' }}>
+                                    后续章节已存在，重做本章可能导致与后续章节的衔接出现不一致。建议重做后立即检查一致性冲突。
+                                </div>
+                            </div>
+                        )}
+
                         <div style={{ marginTop: 12 }}>
                             {editing && canEditDraft ? (
                                 <textarea
@@ -1781,26 +1535,29 @@ export default function ChapterWorkbenchPage() {
                             )}
                         </div>
 
-                        <div className="grid-actions" style={{ marginTop: 12 }}>
+                        <div className="grid-actions" style={{ marginTop: 12, alignItems: 'center', gap: 10 }}>
+                            <div className="card-strong" style={{ padding: '8px 10px', minWidth: 260 }}>
+                                <div className="metric-label">当前状态：{statusMeta.label}</div>
+                                <div className="muted" style={{ fontSize: '0.85rem', marginTop: 4 }}>{statusMeta.hint}</div>
+                                {p0Conflicts.length > 0 && (
+                                    <div style={{ fontSize: '0.82rem', marginTop: 4, color: 'var(--warning, #faad14)' }}>
+                                        当前阻断：存在未解决 P0 冲突，请先处理后再审批。
+                                    </div>
+                                )}
+                            </div>
                             <DisabledTooltip
-                                reason={
-                                    p0Conflicts.length > 0
-                                        ? '存在 P0 冲突，请先解决后再审批'
-                                        : !draftContent.trim()
-                                            ? '无草稿内容'
-                                            : '正在生成中，请等待完成或停止当前任务'
-                                }
-                                disabled={streaming || p0Conflicts.length > 0 || !draftContent.trim()}
+                                reason={primaryActionReason}
+                                disabled={!canSubmitApproval}
                             >
                                 <button
                                     className="btn btn-primary"
-                                    onClick={() => reviewDraft('approve')}
-                                    disabled={streaming || p0Conflicts.length > 0 || !draftContent.trim()}
+                                    onClick={() => (isApproved ? reopenReview() : reviewDraft('approve'))}
+                                    disabled={!canSubmitApproval}
                                 >
-                                    审批通过
+                                    {primaryActionLabel}
                                 </button>
                             </DisabledTooltip>
-                            <button className="btn btn-secondary" onClick={() => setShowRejectConfirm(true)} disabled={streaming}>
+                            <button className="btn btn-secondary" onClick={() => setShowRejectConfirm(true)} disabled={isGenerating}>
                                 退回重写
                             </button>
                             {p0Conflicts.length > 0 && (
@@ -1828,49 +1585,20 @@ export default function ChapterWorkbenchPage() {
                     </div>
                 )}
 
-                {/* 清空创作台确认对话框 */}
-                {showClearWorkspaceConfirm && (
-                    <div className="modal-backdrop">
-                        <div className="card" style={{ padding: 20, textAlign: 'center', maxWidth: 380 }}>
-                            <p style={{ margin: '0 0 8px', fontWeight: 500 }}>清空当前创作台？</p>
-                            <p className="muted" style={{ margin: '0 0 16px' }}>
-                                该操作只清空当前页面编辑区和本地草稿，不会删除服务器已保存内容与历史章节。
-                            </p>
-                            <div style={{ display: 'flex', justifyContent: 'center', gap: 10 }}>
-                                <button className="btn btn-secondary" onClick={() => setShowClearWorkspaceConfirm(false)}>
-                                    取消
-                                </button>
-                                <button
-                                    className="btn btn-primary"
-                                    onClick={() => {
-                                        setShowClearWorkspaceConfirm(false)
-                                        clearWorkspaceLocally()
-                                    }}
-                                >
-                                    确认清空
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                )}
-
                 {/* 删除章节确认对话框 */}
                 {showDeleteConfirm && (
                     <div className="modal-backdrop">
                         <div className="card" style={{ padding: 20, textAlign: 'center', maxWidth: 420 }}>
-                            <p style={{ margin: '0 0 8px', fontWeight: 500 }}>删除当前章节？</p>
+                            <p style={{ margin: '0 0 8px', fontWeight: 500 }}>确认删除当前章节？</p>
                             <p className="muted" style={{ margin: '0 0 16px' }}>
-                                你可以直接删除，或删除后按相同章节号重建一个空白章节继续写。
+                                删除后将返回项目页。如仍需该章节，请回到创作控制台重新生成或在项目页新建章节。
                             </p>
                             <div style={{ display: 'flex', justifyContent: 'center', gap: 10, flexWrap: 'wrap' }}>
                                 <button className="btn btn-secondary" onClick={() => setShowDeleteConfirm(false)} disabled={deletingChapter}>
                                     取消
                                 </button>
-                                <button className="btn btn-secondary" onClick={() => void handleDeleteChapter(false)} disabled={deletingChapter}>
-                                    {deletingChapter ? '删除中...' : '仅删除并返回'}
-                                </button>
-                                <button className="btn btn-primary" onClick={() => void handleDeleteChapter(true)} disabled={deletingChapter}>
-                                    {deletingChapter ? '重建中...' : '删除并重建同编号'}
+                                <button className="btn btn-primary" onClick={() => void handleDeleteChapter()} disabled={deletingChapter}>
+                                    {deletingChapter ? '删除中...' : '确认删除'}
                                 </button>
                             </div>
                         </div>
