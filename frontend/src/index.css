@@ -1318,6 +1318,13 @@ pre {
   margin-bottom: 10px;
 }
 
+.workbench-channel-viewer__textarea {
+  min-height: 480px;
+  max-height: 480px;
+  overflow: auto;
+  resize: none;
+}
+
 /* ── ChapterTOC ── */
 
 .writing-toc {

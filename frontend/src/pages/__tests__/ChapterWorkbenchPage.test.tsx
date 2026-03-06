@@ -500,6 +500,30 @@ describe('ChapterWorkbenchPage', () => {
         expect(screen.getByText('P1 1')).toBeTruthy()
     })
 
+    it('一致性冲突卡片位于正文草稿卡片之后', async () => {
+        renderPage()
+        await waitFor(() => {
+            expect(screen.getByText('正文草稿')).toBeTruthy()
+            expect(screen.getByText('一致性冲突')).toBeTruthy()
+        })
+
+        const draftHeading = screen.getByText('正文草稿')
+        const conflictsHeading = screen.getByText('一致性冲突')
+        const rightColumn = document.querySelector('.workbench-right-column')
+        const draftCard = draftHeading.closest('section.card')
+        const conflictsCard = conflictsHeading.closest('section.card')
+
+        expect(rightColumn).toBeTruthy()
+        expect(draftCard).toBeTruthy()
+        expect(conflictsCard).toBeTruthy()
+        expect(conflictsCard).not.toBe(draftCard)
+        expect(rightColumn?.contains(draftCard as Node)).toBe(true)
+        expect(rightColumn?.contains(conflictsCard as Node)).toBe(true)
+        expect(
+            draftHeading.compareDocumentPosition(conflictsHeading) & Node.DOCUMENT_POSITION_FOLLOWING,
+        ).toBeTruthy()
+    })
+
     it('显示冲突详情和建议修复', async () => {
         renderPage()
         await waitFor(() => {
@@ -672,9 +696,9 @@ describe('ChapterWorkbenchPage', () => {
         mockApiPost.mockResolvedValue({ data: {} })
         renderPage()
         await waitFor(() => {
-            expect(screen.getByText('重新生成蓝图')).toBeTruthy()
+            expect(screen.getAllByText('重新生成蓝图').length).toBeGreaterThan(0)
         })
-        fireEvent.click(screen.getByText('重新生成蓝图'))
+        fireEvent.click(screen.getAllByText('重新生成蓝图')[0])
         await waitFor(() => {
             expect(mockAddToast).toHaveBeenCalledWith('success', '蓝图生成成功')
         })
@@ -684,9 +708,9 @@ describe('ChapterWorkbenchPage', () => {
         mockApiPost.mockRejectedValue(new Error('后端错误'))
         renderPage()
         await waitFor(() => {
-            expect(screen.getByText('重新生成蓝图')).toBeTruthy()
+            expect(screen.getAllByText('重新生成蓝图').length).toBeGreaterThan(0)
         })
-        fireEvent.click(screen.getByText('重新生成蓝图'))
+        fireEvent.click(screen.getAllByText('重新生成蓝图')[0])
         await waitFor(() => {
             expect(mockAddToast).toHaveBeenCalledWith('error', '蓝图生成失败', expect.objectContaining({
                 context: '蓝图生成',
@@ -708,9 +732,9 @@ describe('ChapterWorkbenchPage', () => {
         })
         renderPage()
         await waitFor(() => {
-            expect(screen.getByText('重新生成蓝图')).toBeTruthy()
+            expect(screen.getAllByText('重新生成蓝图').length).toBeGreaterThan(0)
         })
-        fireEvent.click(screen.getByText('重新生成蓝图'))
+        fireEvent.click(screen.getAllByText('重新生成蓝图')[0])
         await waitFor(() => {
             expect(mockAddToast).toHaveBeenCalledWith('warning', '蓝图质量告警', expect.objectContaining({
                 context: expect.stringContaining('质量分 61'),
@@ -720,14 +744,13 @@ describe('ChapterWorkbenchPage', () => {
 
     /* ── 编辑模式 ── */
 
-    it('默认进入编辑模式并可切换到预览', async () => {
+    it('不再显示预览正文切换按钮', async () => {
         renderPage()
         await waitFor(() => {
-            expect(screen.getByText('预览正文')).toBeTruthy()
+            expect(screen.getByText('保存编辑并重检')).toBeTruthy()
         })
-        fireEvent.click(screen.getByText('预览正文'))
-        expect(screen.getByText('返回编辑')).toBeTruthy()
-        expect(screen.getByText('保存编辑并重检')).toBeTruthy()
+        expect(screen.queryByText('预览正文')).toBeNull()
+        expect(screen.queryByText('返回编辑')).toBeNull()
     })
 
     it('不再提供清空创作台入口', async () => {
@@ -832,10 +855,12 @@ describe('ChapterWorkbenchPage', () => {
             expect(screen.getByPlaceholderText(/描述你想怎么改这一章/)).toBeTruthy()
         })
 
+        expect(screen.getByText('章节修改方向')).toBeTruthy()
+
         fireEvent.change(screen.getByPlaceholderText(/描述你想怎么改这一章/), {
             target: { value: '把背叛改成暗中保护的误会' },
         })
-        fireEvent.click(screen.getByText('重新生成蓝图'))
+        fireEvent.click(screen.getAllByText('重新生成蓝图')[0])
 
         await waitFor(() => {
             expect(mockApiPost).toHaveBeenCalledWith(
@@ -854,6 +879,47 @@ describe('ChapterWorkbenchPage', () => {
 
         expect(screen.queryByText('流式生成草稿')).toBeNull()
         expect(screen.queryByText('继续流式生成')).toBeNull()
+    })
+
+    it('导演设定润色通道使用固定高度只读文本框查看区', async () => {
+        mockApiGet.mockImplementation((url: string) => {
+            if (url === '/chapters/ch-1') {
+                return Promise.resolve({ data: sampleChapter })
+            }
+            if (url === '/trace/ch-1') {
+                return Promise.resolve({
+                    data: {
+                        channel_snapshot: {
+                            director: '导演阶段待办',
+                            setter: '设定阶段校验',
+                            stylist: '润色阶段建议',
+                        },
+                    },
+                })
+            }
+            return Promise.resolve({ data: sampleChapter })
+        })
+
+        renderPage()
+        await waitFor(() => {
+            expect(screen.getByText('导演')).toBeTruthy()
+        })
+
+        fireEvent.click(screen.getByText('导演'))
+        await waitFor(() => {
+            expect(Array.from(document.querySelectorAll('textarea')).some((node) =>
+                (node as HTMLTextAreaElement).value.includes('导演阶段待办'),
+            )).toBe(true)
+        })
+
+        const readonlyArea = Array.from(document.querySelectorAll('textarea')).find((node) =>
+            (node as HTMLTextAreaElement).value.includes('导演阶段待办'),
+        ) as HTMLTextAreaElement | undefined
+
+        expect(readonlyArea).toBeTruthy()
+        expect(readonlyArea?.readOnly).toBe(true)
+        expect(readonlyArea?.style.minHeight).toBe('480px')
+        expect(readonlyArea?.style.overflow).toBe('auto')
     })
 
     it('不再提供删除并重建同编号入口', async () => {
@@ -904,7 +970,7 @@ describe('ChapterWorkbenchPage', () => {
             vi.useRealTimers()
             renderPage()
             await waitFor(() => {
-                expect(screen.getByText('预览正文')).toBeTruthy()
+                expect(screen.getByText('保存编辑并重检')).toBeTruthy()
             })
 
             // Type into the textarea
@@ -970,8 +1036,7 @@ describe('ChapterWorkbenchPage', () => {
             // Dialog should close
             expect(screen.queryByText('发现本地草稿')).toBeNull()
 
-            // Should be in editing mode with restored content
-            expect(screen.getByText('预览正文')).toBeTruthy()
+            expect(screen.getByText('保存编辑并重检')).toBeTruthy()
             const textarea = screen.getAllByRole('textbox').find(
                 (el) => (el as HTMLTextAreaElement).value === '本地保存的草稿内容'
             )

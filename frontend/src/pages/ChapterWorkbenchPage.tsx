@@ -338,7 +338,6 @@ export default function ChapterWorkbenchPage() {
     const activeStreamText = streamChannel === 'arbiter'
         ? draftContent
         : streamChannelText[streamChannel]
-    const canEditDraft = streamChannel === 'arbiter'
     const emptyStreamText = streamChannel === 'arbiter'
         ? '当前暂无正文，请先在创作控制台生成，或基于已有内容在此继续修改。'
         : '等待该阶段输出...'
@@ -1271,7 +1270,7 @@ export default function ChapterWorkbenchPage() {
                 )}
 
                 {/* 主体内容 */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 1.4fr', gap: 14 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1.08fr)', gap: 16, alignItems: 'start' }}>
                     {/* 左栏 */}
                     <div style={{ display: 'grid', gap: 12 }}>
                         {/* 章节蓝图 */}
@@ -1394,60 +1393,45 @@ export default function ChapterWorkbenchPage() {
                                     </div>
                                 </div>
                             )}
-                            <div style={{ marginTop: 12, display: 'grid', gap: 10 }}>
-                                <div>
-                                    <div className="metric-label" style={{ marginBottom: 6 }}>修改方向（可选）</div>
-                                    <textarea
-                                        className="textarea"
-                                        rows={3}
-                                        placeholder="描述你想怎么改这一章，如：把背叛改成暗中保护的误会"
-                                        value={directionHint}
-                                        onChange={(e) => setDirectionHint(e.target.value)}
-                                        disabled={loadingPlan || streaming}
-                                    />
-                                </div>
-                                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                                    <button type="button" className="btn btn-secondary" onClick={generatePlan} disabled={loadingPlan || streaming}>
+                            <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                                <button type="button" className="btn btn-secondary" onClick={generatePlan} disabled={loadingPlan || streaming}>
                                     {loadingPlan ? '生成中...' : chapter.plan ? '重新生成蓝图' : '生成蓝图'}
-                                    </button>
-                                </div>
+                                </button>
                             </div>
                         </section>
 
-                        {/* 一致性冲突 */}
-                        <section className="card" style={{ padding: 14 }}>
-                            <h2 className="section-title">一致性冲突</h2>
-                            <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                                <span className="chip p0">P0 {p0Conflicts.length}</span>
-                                <span className="chip p1">P1 {p1Conflicts.length}</span>
-                                <span className="chip p2">P2 {p2Conflicts.length}</span>
-                            </div>
-                            <div style={{ marginTop: 12, display: 'grid', gap: 8, maxHeight: 220, overflow: 'auto' }}>
-                                {(chapter.conflicts || []).length === 0 && (
-                                    <p className="muted" style={{ margin: 0 }}>当前无冲突。</p>
-                                )}
-                                {(chapter.conflicts || []).map((conflict) => (
-                                    <article key={conflict.id} className="card-strong" style={{ padding: 10 }}>
-                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
-                                            <span className={`chip ${conflict.severity.toLowerCase()}`}>{conflict.severity}</span>
-                                            <span className="metric-label">{conflict.rule_id}</span>
-                                        </div>
-                                        <p style={{ margin: '8px 0 0' }}>{conflict.reason}</p>
-                                        {conflict.suggested_fix && (
-                                            <p className="muted" style={{ margin: '6px 0 0' }}>建议：{conflict.suggested_fix}</p>
-                                        )}
-                                    </article>
-                                ))}
-                            </div>
-                        </section>
                     </div>
 
-                    {/* 右栏 - 正文草稿 */}
-                    <section className="card" style={{ padding: 14 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
-                            <h2 className="section-title">正文草稿</h2>
-                            <span className="chip">字数 {chapter.word_count || draftContent.length}</span>
-                        </div>
+                    {/* 右栏 */}
+                    <div className="workbench-right-column" style={{ display: 'grid', gap: 12 }}>
+                        {/* 正文草稿 */}
+                        <section className="card" style={{ padding: 14 }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+                                <h2 className="section-title">正文草稿</h2>
+                                <span className="chip">字数 {chapter.word_count || draftContent.length}</span>
+                            </div>
+
+                        <section className="card-strong" style={{ marginTop: 12, padding: 12, display: 'grid', gap: 10 }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                                <div>
+                                    <div className="section-title" style={{ margin: 0, fontSize: '0.92rem' }}>章节修改方向</div>
+                                    <div className="muted" style={{ marginTop: 4, fontSize: '0.8rem' }}>
+                                        右侧统一处理正文修改、蓝图重生与本章重做，让审核和修改保持在同一上下文里。
+                                    </div>
+                                </div>
+                                <button type="button" className="btn btn-secondary" onClick={generatePlan} disabled={loadingPlan || streaming}>
+                                    {loadingPlan ? '生成中...' : chapter.plan ? '重新生成蓝图' : '生成蓝图'}
+                                </button>
+                            </div>
+                            <textarea
+                                className="textarea"
+                                rows={4}
+                                placeholder="描述你想怎么改这一章，如：把背叛改成暗中保护的误会"
+                                value={directionHint}
+                                onChange={(e) => setDirectionHint(e.target.value)}
+                                disabled={loadingPlan || streaming}
+                            />
+                        </section>
 
                         <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                             {!chapter.plan && (
@@ -1460,9 +1444,6 @@ export default function ChapterWorkbenchPage() {
                                     {streaming ? (streamingStage || '重做中...') : '重做本章'}
                                 </button>
                             </DisabledTooltip>
-                            <button type="button" className="btn btn-secondary" onClick={() => setEditing((s) => !s)}>
-                                {editing ? '预览正文' : '返回编辑'}
-                            </button>
                             <button type="button" className="btn btn-secondary" disabled={savingDraft || streaming} onClick={saveDraft}>
                                 {savingDraft ? '保存中...' : '保存编辑并重检'}
                             </button>
@@ -1503,7 +1484,7 @@ export default function ChapterWorkbenchPage() {
                         </div>
 
                         {hasLaterChapters && (
-                            <div className="card-strong" style={{ marginTop: 12, padding: '10px 12px' }}>
+                            <div className="blueprint-quality-alert" style={{ marginTop: 12 }}>
                                 <div className="metric-label" style={{ color: 'var(--warning, #faad14)' }}>重做本章衔接风险</div>
                                 <div className="muted" style={{ marginTop: 4, fontSize: '0.84rem' }}>
                                     后续章节已存在，重做本章可能导致与后续章节的衔接出现不一致。建议重做后立即检查一致性冲突。
@@ -1512,27 +1493,17 @@ export default function ChapterWorkbenchPage() {
                         )}
 
                         <div style={{ marginTop: 12 }}>
-                            {editing && canEditDraft ? (
-                                <textarea
-                                    className="textarea"
-                                    rows={22}
-                                    value={draftContent}
-                                    onChange={(e) => setDraftContent(e.target.value)}
-                                />
-                            ) : (
-                                <div
-                                    className="card-strong"
-                                    style={{
-                                        padding: 12,
-                                        minHeight: 420,
-                                        whiteSpace: 'pre-wrap',
-                                        lineHeight: 1.7,
-                                        overflow: 'auto',
-                                    }}
-                                >
-                                    {activeStreamText || emptyStreamText}
-                                </div>
-                            )}
+                            <textarea
+                                className="textarea workbench-channel-viewer__textarea"
+                                rows={22}
+                                value={activeStreamText || emptyStreamText}
+                                onChange={(e) => {
+                                    if (streamChannel !== 'arbiter') return
+                                    setDraftContent(e.target.value)
+                                }}
+                                readOnly={streamChannel !== 'arbiter'}
+                                style={{ minHeight: 480, overflow: 'auto', resize: 'vertical', whiteSpace: 'pre-wrap', lineHeight: 1.7 }}
+                            />
                         </div>
 
                         <div className="grid-actions" style={{ marginTop: 12, alignItems: 'center', gap: 10 }}>
@@ -1566,7 +1537,35 @@ export default function ChapterWorkbenchPage() {
                                 </span>
                             )}
                         </div>
-                    </section>
+
+                        </section>
+
+                        <section className="card" style={{ padding: 14 }}>
+                            <h2 className="section-title">一致性冲突</h2>
+                            <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                                <span className="chip p0">P0 {p0Conflicts.length}</span>
+                                <span className="chip p1">P1 {p1Conflicts.length}</span>
+                                <span className="chip p2">P2 {p2Conflicts.length}</span>
+                            </div>
+                            <div style={{ marginTop: 12, display: 'grid', gap: 8, maxHeight: 220, overflow: 'auto' }}>
+                                {(chapter.conflicts || []).length === 0 && (
+                                    <p className="muted" style={{ margin: 0 }}>当前无冲突。</p>
+                                )}
+                                {(chapter.conflicts || []).map((conflict) => (
+                                    <article key={conflict.id} className="card-strong" style={{ padding: 10 }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+                                            <span className={`chip ${conflict.severity.toLowerCase()}`}>{conflict.severity}</span>
+                                            <span className="metric-label">{conflict.rule_id}</span>
+                                        </div>
+                                        <p style={{ margin: '8px 0 0' }}>{conflict.reason}</p>
+                                        {conflict.suggested_fix && (
+                                            <p className="muted" style={{ margin: '6px 0 0' }}>建议：{conflict.suggested_fix}</p>
+                                        )}
+                                    </article>
+                                ))}
+                            </div>
+                        </section>
+                    </div>
                 </div>
 
                 {/* 退回重写确认对话框 */}
