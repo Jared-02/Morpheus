@@ -54,7 +54,10 @@ data/projects/
 # Playwright
 .playwright-cli/
 output/
+frontend/output/
+test-results/
 playwright-before-submit-snapshot.md
+playwright-before-submit-live.md
 *-old-ui-proof.png
 *-old-ui-proof.jpg
 *-old-ui-proof.jpeg
