@@ -14,15 +14,11 @@ async function createProjectFromModal(page: Page, name: string) {
 
   await modal.locator('input').first().fill(name)
 
-  const genreSelect = modal.getByRole('combobox', { name: '题材' })
-  await genreSelect.selectOption('__custom__')
-  const genreInput = modal.getByPlaceholder('输入自定义题材，如：赛博修仙 / 克苏鲁')
+  const genreInput = modal.getByPlaceholder('例如：赛博修仙 / 太空歌剧 / 克苏鲁')
   await genreInput.fill('太空歌剧')
   await expect(genreInput).toBeFocused()
 
-  const styleSelect = modal.getByRole('combobox', { name: '文风契约' })
-  await styleSelect.selectOption('__custom__')
-  const styleInput = modal.getByPlaceholder('输入自定义文风，如：黑色幽默 / 史诗抒情')
+  const styleInput = modal.getByRole('textbox', { name: '文风契约' })
   await styleInput.fill('冷峻现实主义')
   await expect(styleInput).toBeFocused()
 
@@ -81,13 +77,9 @@ test('system bugfix regression', async ({ page, request }) => {
   await page.getByRole('link', { name: '进入工作台' }).first().click()
   await expect(page.getByRole('heading', { name: /第\s*\d+\s*章/ })).toBeVisible()
 
-  const oneShotCard = page.locator('.card-strong').filter({ hasText: '一句话整篇' })
-  const oneShotWordsInput = oneShotCard.locator('input[type="number"]')
-  await expect(oneShotWordsInput).toBeVisible()
-  await oneShotWordsInput.fill('')
-  await expect(oneShotWordsInput).toHaveValue('')
-  await oneShotWordsInput.fill('2200')
-  await expect(oneShotWordsInput).toHaveValue('2200')
+  await expect(page.getByRole('button', { name: '重做本章' })).toBeVisible()
+  await expect(page.getByText('修改方向（可选）')).toBeVisible()
+  await expect(page.getByPlaceholder('描述你想怎么改这一章，如：把背叛改成暗中保护的误会')).toBeVisible()
   await page.screenshot({ path: `${SCREENSHOT_DIR}/system_bugfix_03_number_inputs.png`, fullPage: true })
 
   const delResp = await request.delete(`${API_BASE}/projects/${projectB}`)
