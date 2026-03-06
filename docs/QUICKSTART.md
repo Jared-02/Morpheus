@@ -94,12 +94,12 @@ curl http://127.0.0.1:8000/api/runtime/llm
 # 流式整卷/整本生成（SSE）
 curl -N -X POST "http://127.0.0.1:8000/api/projects/<project_id>/one-shot-book/stream" \
   -H "Content-Type: application/json" \
-  -d '{"prompt":"主角在雪夜被背叛后潜伏反击","mode":"studio","scope":"volume","chapter_count":4,"words_per_chapter":1600,"auto_approve":true}'
+  -d '{"batch_direction":"主角在雪夜被背叛后潜伏反击","mode":"studio","chapter_count":4,"words_per_chapter":1600,"auto_approve":true}'
 
 # 查看 Prompt 和约束预览
 curl -X POST "http://127.0.0.1:8000/api/projects/<project_id>/prompt-preview" \
   -H "Content-Type: application/json" \
-  -d '{"prompt":"主角在雪夜被背叛后潜伏反击","mode":"studio","scope":"volume","chapter_count":4,"target_words":1600}'
+  -d '{"prompt":"主角在雪夜被背叛后潜伏反击","mode":"studio","chapter_count":4,"target_words":1600}'
 ```
 
 ## 支持的模型
