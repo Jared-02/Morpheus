@@ -267,7 +267,6 @@ describe('WritingConsolePage', () => {
             { id: 'ch-1', chapter_number: 1, title: '序章', status: 'done', word_count: 1500, p0_count: 0 },
         ]
         renderPage()
-        fireEvent.click(screen.getByText('显示辅助面板'))
         fireEvent.click(screen.getByText('统计'))
         expect(screen.getByText('1 章')).toBeTruthy()
     })
@@ -278,7 +277,6 @@ describe('WritingConsolePage', () => {
             { chapterId: 'ch-2', chapterNumber: 2, title: '觉醒', body: '更多内容', waiting: false },
         ]
         renderPage()
-        fireEvent.click(screen.getByText('显示辅助面板'))
         expect(screen.getAllByText('章节目录').length).toBeGreaterThan(0)
         expect(screen.getByText('第1章')).toBeTruthy()
         expect(screen.getByText('序章')).toBeTruthy()
@@ -292,7 +290,6 @@ describe('WritingConsolePage', () => {
             { chapterId: 'ch-2', chapterNumber: 2, title: '觉醒', body: '更多内容', waiting: false },
         ]
         renderPage()
-        fireEvent.click(screen.getByText('显示辅助面板'))
 
         const paper = document.querySelector('.stream-paper') as HTMLElement
         const scrollToMock = vi.fn()
@@ -316,7 +313,6 @@ describe('WritingConsolePage', () => {
             { chapterId: 'ch-2', chapterNumber: 2, title: '觉醒', body: '更多内容', waiting: false },
         ]
         renderPage()
-        fireEvent.click(screen.getByText('显示辅助面板'))
 
         const paper = document.querySelector('.stream-paper') as HTMLElement
         const sectionEls = Array.from(document.querySelectorAll('.stream-section')) as HTMLElement[]
@@ -368,17 +364,39 @@ describe('WritingConsolePage', () => {
     it('渲染日志面板', () => {
         mockStreamStore.logs = ['10:00:00  开始流式生成']
         renderPage()
-        fireEvent.click(screen.getByText('显示辅助面板'))
         fireEvent.click(screen.getByText('日志'))
         expect(screen.getByText('生成日志')).toBeTruthy()
         expect(screen.getByText(/10:00:00.*开始流式生成/)).toBeTruthy()
     })
 
-    it('高级设置默认折叠', () => {
+    it('高级设置默认平铺显示', () => {
         renderPage()
-        expect(screen.getByText('高级设置')).toBeTruthy()
-        expect(document.querySelector('details.advanced-box')).toBeTruthy()
-        expect((document.querySelector('details.advanced-box') as HTMLDetailsElement).open).toBe(false)
+        expect(document.querySelector('details.advanced-box')).toBeNull()
+        expect(screen.getByLabelText('章节数')).toBeTruthy()
+        expect(screen.getByLabelText('每章目标字数')).toBeTruthy()
+        expect(screen.getByText('无 P0 冲突自动审批')).toBeTruthy()
+    })
+
+    it('辅助面板默认显示', () => {
+        mockStreamStore.sections = [
+            { chapterId: 'ch-1', chapterNumber: 1, title: '序章', body: '内容', waiting: false },
+        ]
+        renderPage()
+        expect(screen.getAllByText('章节目录').length).toBeGreaterThan(0)
+        expect(screen.getByText('隐藏辅助面板')).toBeTruthy()
+    })
+
+    it('通过问号悬浮提示显示生成模式差异说明', () => {
+        renderPage()
+        const helpTrigger = screen.getByLabelText('生成模式说明')
+        fireEvent.mouseEnter(helpTrigger)
+        const tooltip = screen.getByRole('tooltip')
+        expect(tooltip.textContent).toContain('工作室')
+        expect(tooltip.textContent).toContain('多 Agent 串行协作')
+        expect(tooltip.textContent).toContain('快速')
+        expect(tooltip.textContent).toContain('更快返回结果')
+        expect(tooltip.textContent).toContain('电影感')
+        expect(tooltip.textContent).toContain('更强调画面感')
     })
 
     /* ── 阅读模式测试 ── */

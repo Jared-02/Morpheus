@@ -412,8 +412,9 @@ export default function WritingConsolePage() {
     const [chapterCountInput, setChapterCountInput] = useState('8')
     const [wordsPerChapterInput, setWordsPerChapterInput] = useState('1600')
     const [continuationPreparing, setContinuationPreparing] = useState(false)
-    const [auxPanelOpen, setAuxPanelOpen] = useState(false)
+    const [auxPanelOpen, setAuxPanelOpen] = useState(true)
     const [auxPanelTab, setAuxPanelTab] = useState<'toc' | 'stats' | 'logs'>('toc')
+    const [modeHelpOpen, setModeHelpOpen] = useState(false)
 
     const [advErrors, setAdvErrors] = useState<Record<string, FieldError | null>>({})
     const prefillAppliedRef = useRef(false)
@@ -1008,6 +1009,28 @@ export default function WritingConsolePage() {
                                         {MODE_LABELS[mode]}
                                     </button>
                                 ))}
+                                <span className="mode-help-trigger">
+                                    <button
+                                        type="button"
+                                        className="mode-help-trigger__button"
+                                        aria-label="生成模式说明"
+                                        onMouseEnter={() => setModeHelpOpen(true)}
+                                        onMouseLeave={() => setModeHelpOpen(false)}
+                                        onFocus={() => setModeHelpOpen(true)}
+                                        onBlur={() => setModeHelpOpen(false)}
+                                    >
+                                        ?
+                                    </button>
+                                    {modeHelpOpen && (
+                                        <span className="disabled-tooltip disabled-tooltip--bottom mode-help-tooltip" role="tooltip">
+                                            <strong style={{ display: 'block', marginBottom: 6 }}>模式说明</strong>
+                                            <span><b>工作室</b>：多 Agent 串行协作，规划更完整，适合正式创作与复杂章节生成。</span>
+                                            <span><b>快速</b>：更快返回结果，适合试方向、补小段或快速续写。</span>
+                                            <span><b>电影感</b>：更强调画面感、镜头感和戏剧张力，适合关键场面。</span>
+                                            <span className="disabled-tooltip__arrow" />
+                                        </span>
+                                    )}
+                                </span>
                             </div>
 
                             <DisabledTooltip reason={startDisabledReason} disabled={startDisabled}>
@@ -1070,9 +1093,9 @@ export default function WritingConsolePage() {
                             </button>
                         </div>
 
-                        <details className="advanced-box" style={{ marginTop: 12 }}>
-                            <summary>高级设置</summary>
-                            <div className="settings-grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)', marginTop: 12 }}>
+                        <div className="advanced-box" style={{ marginTop: 12 }}>
+                            <div className="metric-label" style={{ marginBottom: 10 }}>生成设置</div>
+                            <div className="settings-grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)', marginTop: 0 }}>
                                 <div className="form-group">
                                     <label className="form-label" htmlFor="adv-chapter-count">章节数</label>
                                     <input
@@ -1160,7 +1183,7 @@ export default function WritingConsolePage() {
                                     生成完成后，若章节无 P0 级冲突则自动通过审批。
                                 </span>
                             </div>
-                        </details>
+                        </div>
 
                         {error && <p className="error-line">{error}</p>}
                     </div>
