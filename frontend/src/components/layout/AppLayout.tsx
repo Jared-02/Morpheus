@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import { Link, Outlet, useLocation } from 'react-router-dom'
 import Sidebar from './Sidebar'
 import ToastContainer from '../ui/ToastContainer'
@@ -6,6 +6,7 @@ import ShortcutHelpPanel from '../ui/ShortcutHelpPanel'
 import { useUIStore } from '../../stores/useUIStore'
 import { useKeyboardShortcuts, type ShortcutDef } from '../../hooks/useKeyboardShortcuts'
 import { GRAPH_FEATURE_ENABLED } from '../../config/features'
+import { applyResolvedTheme, resolveThemeMode } from '../../theme/themeSystem'
 
 export default function AppLayout() {
     const location = useLocation()
@@ -14,6 +15,8 @@ export default function AppLayout() {
     const toggleShortcutHelp = useUIStore((s) => s.toggleShortcutHelp)
     const shortcutHelpOpen = useUIStore((s) => s.shortcutHelpOpen)
     const exitReadingMode = useUIStore((s) => s.exitReadingMode)
+    const themeMode = useUIStore((s) => s.themeMode)
+    const themePaletteId = useUIStore((s) => s.themePaletteId)
 
     const globalShortcuts: ShortcutDef[] = useMemo(
         () => [
@@ -40,6 +43,10 @@ export default function AppLayout() {
     )
 
     useKeyboardShortcuts(globalShortcuts)
+
+    useEffect(() => {
+        applyResolvedTheme(document.documentElement, resolveThemeMode(themeMode), themePaletteId)
+    }, [themeMode, themePaletteId])
 
     const layoutClass = [
         'app-layout',

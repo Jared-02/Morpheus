@@ -65,6 +65,22 @@ const IconChart = () => (
     </svg>
 )
 
+const IconThemeLight = () => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4" />
+        <path d="M12 2v2.2" /><path d="M12 19.8V22" />
+        <path d="M4.93 4.93l1.56 1.56" /><path d="M17.51 17.51l1.56 1.56" />
+        <path d="M2 12h2.2" /><path d="M19.8 12H22" />
+        <path d="M4.93 19.07l1.56-1.56" /><path d="M17.51 6.49l1.56-1.56" />
+    </svg>
+)
+
+const IconThemeDark = () => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3c0 0 0 0 0 0A7 7 0 0 0 21 12.79z" />
+    </svg>
+)
+
 const projectSubNav: SubNavItem[] = [
     { to: '', label: '项目概览', icon: <IconOverview />, end: true },
     { to: '/write', label: '创作控制台', icon: <IconPen /> },
@@ -81,6 +97,11 @@ export default function Sidebar() {
     const collapsed = useUIStore((s) => s.sidebarCollapsed)
     const toggleSidebar = useUIStore((s) => s.toggleSidebar)
     const recentItems = useRecentAccessStore((s) => s.items)
+    const themeMode = useUIStore((s) => s.themeMode)
+    const setThemeMode = useUIStore((s) => s.setThemeMode)
+    const isDark = themeMode === 'dark'
+    const nextMode = isDark ? 'light' : 'dark'
+    const nextModeLabel = isDark ? '浅色模式' : '深色模式'
 
     const projectIdMatch = location.pathname.match(/^\/project\/([^/]+)/)
     const projectId = projectIdMatch ? projectIdMatch[1] : null
@@ -94,10 +115,11 @@ export default function Sidebar() {
     const showProjectSubNav = Boolean(projectId) && !projectNotFound
 
     return (
-        <aside className={`sidebar ${collapsed ? 'sidebar--collapsed' : ''}`} role="navigation" aria-label="主导航">
+        <nav className={`sidebar ${collapsed ? 'sidebar--collapsed' : ''}`} aria-label="主导航">
             <div className="sidebar__header">
                 {!collapsed && <span className="sidebar__brand">Morpheus</span>}
                 <button
+                    type="button"
                     className="sidebar__toggle"
                     onClick={toggleSidebar}
                     aria-label={collapsed ? '展开侧边栏' : '收起侧边栏'}
@@ -106,7 +128,7 @@ export default function Sidebar() {
                 </button>
             </div>
 
-            <nav className="sidebar__nav">
+            <div className="sidebar__nav">
                 <div className="sidebar__section">
                     {!collapsed && <span className="sidebar__section-title">导航</span>}
                     <NavLink to="/" end
@@ -174,8 +196,21 @@ export default function Sidebar() {
                         {!collapsed && <span>评测看板</span>}
                     </NavLink>
                 </div>
-            </nav>
+
+            </div>
             {!collapsed && <ActivityPanel />}
-        </aside>
+            {!collapsed && (
+                <div className="sidebar__theme-quick-toggle">
+                    <button
+                        type="button"
+                        className="sidebar__theme-quick-button"
+                        aria-label={`切换到${nextModeLabel}`}
+                        onClick={() => setThemeMode(nextMode)}
+                    >
+                        {isDark ? <IconThemeLight /> : <IconThemeDark />}
+                    </button>
+                </div>
+            )}
+        </nav>
     )
 }

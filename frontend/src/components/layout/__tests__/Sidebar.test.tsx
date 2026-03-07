@@ -27,6 +27,8 @@ beforeEach(() => {
         sidebarCollapsed: false,
         readingMode: false,
         shortcutHelpOpen: false,
+        themeMode: 'light',
+        themePaletteId: 'water-lilies-dawn',
     })
     useActivityStore.setState({
         records: [],
@@ -160,9 +162,9 @@ describe('Sidebar', () => {
         })
 
         it('highlights 评测看板 on /dashboard', () => {
-            const { container } = renderSidebar('/dashboard')
-            const globalLinks = container.querySelectorAll('.sidebar__section:last-child .sidebar__link')
-            expect(globalLinks[0].classList.contains('sidebar__link--active')).toBe(true)
+            renderSidebar('/dashboard')
+            const dashboardLink = screen.getByText('评测看板').closest('a')
+            expect(dashboardLink?.classList.contains('sidebar__link--active')).toBe(true)
         })
     })
 
@@ -254,6 +256,36 @@ describe('Sidebar', () => {
             })
             renderSidebar()
             expect(screen.queryByText('最近访问')).not.toBeInTheDocument()
+        })
+    })
+
+    describe('主题控制', () => {
+        it('shows a single bottom-left icon-only theme quick toggle when expanded', () => {
+            renderSidebar()
+            expect(screen.getByRole('button', { name: '切换到深色模式' })).toBeInTheDocument()
+            expect(document.querySelector('.sidebar__theme-quick-button svg')).toBeInTheDocument()
+            expect(screen.queryByText('浅色 · 睡莲晨光')).not.toBeInTheDocument()
+        })
+
+        it('toggles to dark mode and fixed dark palette when clicked', () => {
+            renderSidebar()
+            fireEvent.click(screen.getByRole('button', { name: '切换到深色模式' }))
+            expect(useUIStore.getState().themeMode).toBe('dark')
+            expect(useUIStore.getState().themePaletteId).toBe('parliament-twilight')
+        })
+
+        it('toggles back to light mode and fixed light palette from dark mode', () => {
+            useUIStore.setState({ themeMode: 'dark', themePaletteId: 'parliament-twilight' })
+            renderSidebar()
+            fireEvent.click(screen.getByRole('button', { name: '切换到浅色模式' }))
+            expect(useUIStore.getState().themeMode).toBe('light')
+            expect(useUIStore.getState().themePaletteId).toBe('water-lilies-dawn')
+        })
+
+        it('hides theme controls when sidebar is collapsed', () => {
+            useUIStore.setState({ sidebarCollapsed: true })
+            renderSidebar()
+            expect(screen.queryByRole('button', { name: /切换到/ })).not.toBeInTheDocument()
         })
     })
 })
