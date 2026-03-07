@@ -1,0 +1,15 @@
+{
+  "name": "fanqie-create-book-atomic",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Atomic guided Fanqie book creation and binding flow",
+  "type": "commonjs",
+  "scripts": {
+    "guided": "node src/index.js guided",
+    "step": "node src/index.js step",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "playwright": "^1.58.2"
+  }
+}

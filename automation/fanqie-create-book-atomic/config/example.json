@@ -1,0 +1,117 @@
+{
+  "urls": {
+    "writerHome": "https://fanqienovel.com/main/writer/?enter_from=author_zone",
+    "createBook": "https://fanqienovel.com/main/writer/create?enter_from=book_manage"
+  },
+  "browser": {
+    "headless": false,
+    "slowMo": 50,
+    "viewportWidth": 1440,
+    "viewportHeight": 900
+  },
+  "paths": {
+    "userDataDir": "./state/chromium-profile",
+    "networkLogDir": "./output/network",
+    "sessionPath": "./state/create-book-session.json",
+    "resultPath": "./state/create-book-result.json",
+    "boundBookStatePath": "./state/book-ids.json"
+  },
+  "timeouts": {
+    "defaultMs": 15000,
+    "createResponseMs": 60000
+  },
+  "flow": {
+    "mode": "guided",
+    "bindOnlyOnPreflightHit": true
+  },
+  "book": {
+    "projectId": "",
+    "title": "",
+    "tags": [],
+    "tagsByTab": {
+      "主分类": [],
+      "主题": [],
+      "角色": [],
+      "情节": []
+    },
+    "clearExistingTags": false,
+    "intro": "",
+    "protagonist1": "",
+    "protagonist2": "",
+    "targetReader": "male",
+    "coverPath": "",
+    "autoSubmit": false
+  },
+  "selectors": {
+    "bookTitle": [
+      "input[placeholder='请输入作品名称']",
+      "input[placeholder*='书名']",
+      "input[placeholder*='作品名']"
+    ],
+    "bookIntro": [
+      "textarea[placeholder*='50-500字以内的作品简介']",
+      "textarea[placeholder*='简介']",
+      "textarea[placeholder*='作品简介']"
+    ],
+    "protagonist1": [
+      "input[placeholder='请输入主角名1']"
+    ],
+    "protagonist2": [
+      "input[placeholder='请输入主角名2']"
+    ],
+    "targetReaderMale": [
+      "label:has-text('男频')",
+      "input[name='pindao'][value='1']",
+      ".arco-radio:has-text('男频')"
+    ],
+    "targetReaderFemale": [
+      "label:has-text('女频')",
+      "input[name='pindao'][value='0']",
+      ".arco-radio:has-text('女频')"
+    ],
+    "tagTrigger": [
+      "#selectRow_input .select-view",
+      ".serial-form-item.cate-wrap .select-view",
+      ".select-row .select-view",
+      ".tomato-down-arrow"
+    ],
+    "tagOptions": [
+      ".arco-select-option",
+      "li[role='option']",
+      ".arco-select-option-content",
+      ".byte-select-option",
+      "span.item-title"
+    ],
+    "tagModal": [
+      "div[role='dialog'].category-modal",
+      "div[role='dialog']:has-text('作品标签')"
+    ],
+    "tagModalConfirmButton": [
+      "button.arco-btn-primary:has-text('确认')",
+      "button:has-text('确认')"
+    ],
+    "selectedTagRemove": [
+      ".create-category-item .item-del",
+      ".create-category-item .tomato-close"
+    ],
+    "coverFileInput": [
+      "input[type='file']"
+    ],
+    "submitButton": [
+      "button.serial-arco-btn:has-text('立即创建')",
+      "button:has-text('立即创建')",
+      "button:has-text('创建作品')",
+      "button:has-text('创建书本')",
+      "button:has-text('下一步')",
+      "button:has-text('提交')"
+    ]
+  },
+  "capture": {
+    "enabled": true,
+    "captureAll": true,
+    "urlIncludes": [],
+    "includeResponseBody": true,
+    "maxBodyChars": 16000,
+    "redactSensitiveQuery": true
+  }
+}
