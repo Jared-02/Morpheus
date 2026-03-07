@@ -1019,7 +1019,6 @@ export default function ChapterWorkbenchPage() {
                                         display: 'flex',
                                         justifyContent: 'space-between',
                                         alignItems: 'center',
-                                        border: '1px solid var(--glass-border)',
                                     }}
                                 >
                                     <span>
@@ -1484,11 +1483,11 @@ export default function ChapterWorkbenchPage() {
                         </div>
 
                         {hasLaterChapters && (
-                            <div className="blueprint-quality-alert" style={{ marginTop: 12 }}>
-                                <div className="metric-label" style={{ color: 'var(--warning, #faad14)' }}>重做本章衔接风险</div>
-                                <div className="muted" style={{ marginTop: 4, fontSize: '0.84rem' }}>
-                                    后续章节已存在，重做本章可能导致与后续章节的衔接出现不一致。建议重做后立即检查一致性冲突。
-                                </div>
+                                <div className="blueprint-quality-alert" style={{ marginTop: 12 }}>
+                                    <div className="metric-label" style={{ color: 'var(--warning)' }}>重做本章衔接风险</div>
+                                    <div className="muted" style={{ marginTop: 4, fontSize: '0.84rem' }}>
+                                        后续章节已存在，重做本章可能导致与后续章节的衔接出现不一致。建议重做后立即检查一致性冲突。
+                                    </div>
                             </div>
                         )}
 
@@ -1511,7 +1510,7 @@ export default function ChapterWorkbenchPage() {
                                 <div className="metric-label">当前状态：{statusMeta.label}</div>
                                 <div className="muted" style={{ fontSize: '0.85rem', marginTop: 4 }}>{statusMeta.hint}</div>
                                 {p0Conflicts.length > 0 && (
-                                    <div style={{ fontSize: '0.82rem', marginTop: 4, color: 'var(--warning, #faad14)' }}>
+                                    <div style={{ fontSize: '0.82rem', marginTop: 4, color: 'var(--warning)' }}>
                                         当前阻断：存在未解决 P0 冲突，请先处理后再审批。
                                     </div>
                                 )}

@@ -56,11 +56,11 @@ const QUICK_QUERIES = [
     { label: '时间线', query: '时间线 顺序 先后', layer: '' },
 ]
 
-const LAYER_META: Record<string, { label: string; color: string; desc: string }> = {
-    L1: { label: 'L1 稳态', color: 'rgba(31, 159, 97, 0.4)', desc: '世界观 · 角色约束 · 文风契约' },
-    L2: { label: 'L2 过程', color: 'rgba(45, 126, 192, 0.4)', desc: '章节决策 · 临时线索 · 创作日志' },
-    L3: { label: 'L3 长期', color: 'rgba(173, 111, 27, 0.4)', desc: '章节摘要 · 事件卡 · 关系变化' },
-    root: { label: '根目录', color: 'rgba(140, 80, 160, 0.4)', desc: '项目级配置文件' },
+export const LAYER_META: Record<string, { label: string; color: string; desc: string }> = {
+    L1: { label: 'L1 稳态', color: 'var(--memory-layer-l1-border)', desc: '世界观 · 角色约束 · 文风契约' },
+    L2: { label: 'L2 过程', color: 'var(--memory-layer-l2-border)', desc: '章节决策 · 临时线索 · 创作日志' },
+    L3: { label: 'L3 长期', color: 'var(--memory-layer-l3-border)', desc: '章节摘要 · 事件卡 · 关系变化' },
+    root: { label: '根目录', color: 'var(--memory-layer-root-border)', desc: '项目级配置文件' },
 }
 
 const SNIPPET_HIT_PATTERN = /(\[\[H\]\][\s\S]*?\[\[\/H\]\]|\[[^\]\n]{1,80}\])/g
@@ -531,7 +531,7 @@ export default function MemoryBrowserPage() {
                                     {layerFilter === 'L4' && L4_PROFILE_ENABLED && (
                                         <div style={{ padding: '12px 0' }}>
                                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                                                <span style={{ fontSize: '0.84rem', color: 'var(--text-muted, #888)' }}>角色档案</span>
+                                                <span style={{ fontSize: '0.84rem', color: 'var(--text-secondary)' }}>角色档案</span>
                                                 <button
                                                     className="chip-btn"
                                                     onClick={rebuildProfiles}
@@ -548,8 +548,8 @@ export default function MemoryBrowserPage() {
                                             {!profilesLoading && profiles.map((profile) => (
                                                 <div key={profile.profile_id} className="card" style={{ marginBottom: 8, padding: 12 }}>
                                                     <h3 style={{ margin: '0 0 4px', fontSize: '1rem' }}>{profile.character_name}</h3>
-                                                    {profile.overview && <p style={{ margin: '0 0 4px', color: 'var(--text-muted, #666)', fontSize: '0.85rem' }}>{profile.overview}</p>}
-                                                    {profile.personality && <p style={{ margin: '0 0 4px', color: 'var(--text-muted, #666)', fontSize: '0.85rem' }}>{profile.personality}</p>}
+                                                    {profile.overview && <p style={{ margin: '0 0 4px', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>{profile.overview}</p>}
+                                                    {profile.personality && <p style={{ margin: '0 0 4px', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>{profile.personality}</p>}
                                                     {profile.relationships && profile.relationships.length > 0 && (
                                                         <ul style={{ margin: '4px 0', paddingLeft: 16, fontSize: '0.82rem' }}>
                                                             {profile.relationships.map((r, i) => (

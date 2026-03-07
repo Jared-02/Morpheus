@@ -39,21 +39,21 @@ export interface TraceData {
 /* ── Agent Role Colors (exported for PBT testing) ── */
 
 export const AGENT_ROLE_COLORS: Record<string, { color: string; borderColor: string; label: string }> = {
-    director: { color: 'rgba(45, 126, 192, 0.14)', borderColor: 'rgba(45, 126, 192, 0.5)', label: '导演' },
-    worldbuilder: { color: 'rgba(31, 159, 97, 0.14)', borderColor: 'rgba(31, 159, 97, 0.5)', label: '设定官' },
-    continuity: { color: 'rgba(173, 111, 27, 0.14)', borderColor: 'rgba(173, 111, 27, 0.5)', label: '连续性审校' },
-    stylist: { color: 'rgba(142, 87, 192, 0.14)', borderColor: 'rgba(142, 87, 192, 0.5)', label: '文风润色' },
-    arbiter: { color: 'rgba(207, 62, 52, 0.14)', borderColor: 'rgba(207, 62, 52, 0.5)', label: '裁决器' },
+    director: { color: 'var(--trace-director-bg)', borderColor: 'var(--trace-director-border)', label: '导演' },
+    worldbuilder: { color: 'var(--trace-worldbuilder-bg)', borderColor: 'var(--trace-worldbuilder-border)', label: '设定官' },
+    continuity: { color: 'var(--trace-continuity-bg)', borderColor: 'var(--trace-continuity-border)', label: '连续性审校' },
+    stylist: { color: 'var(--trace-stylist-bg)', borderColor: 'var(--trace-stylist-border)', label: '文风润色' },
+    arbiter: { color: 'var(--trace-arbiter-bg)', borderColor: 'var(--trace-arbiter-border)', label: '裁决器' },
 }
 
-const SEVERITY_STYLES: Record<string, string> = {
-    p0: 'rgba(207, 62, 52, 0.14)',
-    p1: 'rgba(173, 111, 27, 0.14)',
-    p2: 'rgba(173, 155, 27, 0.14)',
+export const SEVERITY_STYLES: Record<string, string> = {
+    p0: 'var(--trace-severity-p0-bg)',
+    p1: 'var(--trace-severity-p1-bg)',
+    p2: 'var(--trace-severity-p2-bg)',
 }
 
 function getRoleStyle(role: string) {
-    return AGENT_ROLE_COLORS[role] ?? { color: 'rgba(167,192,222,0.2)', borderColor: 'rgba(167,192,222,0.4)', label: role }
+    return AGENT_ROLE_COLORS[role] ?? { color: 'var(--trace-default-bg)', borderColor: 'var(--trace-default-border)', label: role }
 }
 
 function sanitizeDecisionText(text?: string) {
@@ -74,7 +74,7 @@ function formatDecisionTime(timestamp: string) {
 /* ── SVG 图标 ── */
 
 export const IconReplay = () => (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"
         strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
         <polyline points="1 4 1 10 7 10" />
         <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
@@ -163,6 +163,7 @@ export default function TraceReplayPage() {
                                 {[...storeChapters].sort((a, b) => a.chapter_number - b.chapter_number).map((ch) => (
                                     <button
                                         key={ch.id}
+                                        type="button"
                                         onClick={() => navigate(`/project/${projectId}/trace/${ch.id}`)}
                                         className="card clickable-card"
                                         style={{
@@ -350,7 +351,7 @@ export default function TraceReplayPage() {
                                         <div style={{ marginTop: 8, display: 'grid', gap: 8, maxHeight: 210, overflow: 'auto' }}>
                                             {trace.memory_hits.length === 0 && <p className="muted">暂无命中。</p>}
                                             {trace.memory_hits.slice(0, 15).map((hit, index) => (
-                                                <article key={index} className="card-strong" style={{ padding: 10 }}>
+                                                <article key={`${String(hit.layer || 'layer')}-${String(hit.source_path || hit.summary || index)}`} className="card-strong" style={{ padding: 10 }}>
                                                     <span className="chip">{(hit.layer as string) || 'N/A'}</span>
                                                     <p style={{ margin: '6px 0 0' }} className="line-clamp-2">
                                                         {(hit.summary as string) || (hit.source_path as string) || '无摘要'}
