@@ -9,6 +9,8 @@ describe('useUIStore - 阅读模式', () => {
             readingMode: false,
             shortcutHelpOpen: false,
             _savedSidebarCollapsed: null,
+            themeMode: 'light',
+            themePaletteId: 'water-lilies-dawn',
         })
     })
 
@@ -64,5 +66,42 @@ describe('useUIStore - 阅读模式', () => {
         const s = useUIStore.getState()
         expect(s.readingMode).toBe(false)
         expect(s.sidebarCollapsed).toBe(false)
+    })
+})
+
+describe('useUIStore - 主题设置', () => {
+    beforeEach(() => {
+        useUIStore.setState({
+            sidebarCollapsed: false,
+            readingMode: false,
+            shortcutHelpOpen: false,
+            _savedSidebarCollapsed: null,
+            themeMode: 'light',
+            themePaletteId: 'water-lilies-dawn',
+        })
+    })
+
+    it('defaults to light mode and Monet dawn palette', () => {
+        const s = useUIStore.getState()
+        expect(s.themeMode).toBe('light')
+        expect(s.themePaletteId).toBe('water-lilies-dawn')
+    })
+
+    it('setThemeMode updates the theme mode', () => {
+        useUIStore.getState().setThemeMode('dark')
+        expect(useUIStore.getState().themeMode).toBe('dark')
+        expect(useUIStore.getState().themePaletteId).toBe('parliament-twilight')
+    })
+
+    it('light mode always maps to water-lilies-dawn', () => {
+        useUIStore.setState({ themeMode: 'dark', themePaletteId: 'parliament-twilight' })
+        useUIStore.getState().setThemeMode('light')
+        expect(useUIStore.getState().themePaletteId).toBe('water-lilies-dawn')
+    })
+
+    it('setThemePalette remains available for future theme expansion', () => {
+        useUIStore.getState().setThemePalette('garden-mist')
+        expect(useUIStore.getState().themePaletteId).toBe('garden-mist')
+        expect(useUIStore.getState().themeMode).toBe('light')
     })
 })
