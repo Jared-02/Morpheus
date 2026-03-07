@@ -528,6 +528,29 @@ async function ensureLoginState(context, page, config) {
   await waitForEnter('请在浏览器中完成登录');
 }
 
+async function openLoginWindow(page, context, config) {
+  const timeoutMs = Math.max(60_000, Number(config?.timeouts?.loginWindowMs || 600_000));
+  const endAt = Date.now() + timeoutMs;
+  await page.goto(config.urls.writerHome, {
+    waitUntil: 'domcontentloaded',
+    timeout: config.timeouts.defaultMs,
+  });
+  console.log('[info] fanqie login window opened');
+  while (Date.now() < endAt) {
+    const cookies = await context.cookies('https://fanqienovel.com').catch(() => []);
+    const hasSession = cookies.some(
+      (c) => ['sessionid', 'sessionid_ss', 'sid_tt'].includes(c.name) && c.value
+    );
+    if (hasSession) {
+      console.log('[result] login_ready=true');
+      await page.waitForTimeout(1200);
+      return;
+    }
+    await page.waitForTimeout(1000);
+  }
+  console.log('[warn] login window timeout without detected session cookie');
+}
+
 async function clickBySelectors(page, selectors, label) {
   const hit = await firstExistingLocator(page, selectors);
   if (!hit) {
@@ -1143,6 +1166,8 @@ async function main() {
       await runInspect(page, context, config);
     } else if (MODE === 'detect-book-id') {
       await runDetectBookId(page, context, config);
+    } else if (MODE === 'open-login') {
+      await openLoginWindow(page, context, config);
     } else {
       throw new Error(`Unknown mode: ${MODE}`);
     }

@@ -164,6 +164,8 @@ const DEFAULT_FANQIE_TAGS = {
     plot: '惊悚游戏',
 }
 
+const FANQIE_LOGIN_REQUIRED_CODE = 'FANQIE_LOGIN_REQUIRED'
+
 function splitFanqieTagInput(value: string, maxItems: number) {
     return String(value || '')
         .split(/[,\n，]/g)
@@ -186,6 +188,26 @@ function normalizeFanqieTagField(value: unknown, fallback: string, maxItems: num
         ? value.map((item) => String(item || '').trim()).filter(Boolean).slice(0, maxItems).join(', ')
         : String(value || '').trim()
     return text || fallback
+}
+
+function getApiErrorDetail(detailRaw: unknown, fallback: string) {
+    if (typeof detailRaw === 'string' && detailRaw.trim()) return detailRaw
+    if (detailRaw && typeof detailRaw === 'object') {
+        const message = String((detailRaw as any).message || '').trim()
+        if (message) return message
+    }
+    return fallback
+}
+
+function parseFanqieLoginRequired(detailRaw: unknown) {
+    if (!detailRaw || typeof detailRaw !== 'object') return null
+    const errorCode = String((detailRaw as any).error_code || '').trim()
+    if (errorCode !== FANQIE_LOGIN_REQUIRED_CODE) return null
+    const loginFlowRaw = String((detailRaw as any).login_flow || '').trim().toLowerCase()
+    return {
+        message: String((detailRaw as any).message || '请先登录番茄作者后台').trim(),
+        loginFlow: loginFlowRaw === 'publish-chapter' ? 'publish-chapter' : 'create-book' as 'publish-chapter' | 'create-book',
+    }
 }
 
 const BLUEPRINT_NOISE_TOKENS = new Set([
@@ -821,6 +843,44 @@ export default function ChapterWorkbenchPage() {
         }
     }
 
+    const requestFanqieLoginWindow = async (flow: 'create-book' | 'publish-chapter') => {
+        return api.post(
+            '/fanqie/open-login-window',
+            { flow },
+            { timeout: 15000 },
+        )
+    }
+
+    const handleFanqieLoginRequired = async (
+        detailRaw: unknown,
+        flow: 'create-book' | 'publish-chapter',
+        retryAction: () => Promise<void>,
+        context: string,
+    ) => {
+        const loginRequired = parseFanqieLoginRequired(detailRaw)
+        if (!loginRequired) return false
+
+        let openFailedDetail = ''
+        try {
+            await requestFanqieLoginWindow(flow)
+        } catch (openErr: any) {
+            const openDetailRaw = openErr?.response?.data?.detail
+            openFailedDetail = getApiErrorDetail(openDetailRaw, openErr?.message || '打开番茄登录窗口失败')
+        }
+
+        addToast(openFailedDetail ? 'error' : 'warning', '请先登录番茄作者后台', {
+            context,
+            detail: openFailedDetail
+                ? `检测到当前未登录，且自动打开登录窗口失败：${openFailedDetail}`
+                : '已为你打开番茄登录窗口，请在弹出的 Chromium 窗口完成登录后再重试。',
+            actions: [
+                { label: '重试', onClick: () => void retryAction() },
+                { label: '重新打开登录窗口', onClick: () => void requestFanqieLoginWindow(flow) },
+            ],
+        })
+        return true
+    }
+
     const publishChapterExternally = async () => {
         if (!chapterId || !chapter) return
         const content = (draftContent || chapter.final || chapter.draft || '').trim()
@@ -853,9 +913,16 @@ export default function ChapterWorkbenchPage() {
         } catch (err: any) {
             console.error(err)
             const detailRaw = err?.response?.data?.detail
-            const detail = typeof detailRaw === 'string'
-                ? detailRaw
-                : detailRaw?.message || err?.message || '一键发布失败'
+            if (await handleFanqieLoginRequired(detailRaw, 'publish-chapter', publishChapterExternally, '番茄发布')) {
+                addRecord({
+                    type: 'save',
+                    description: '番茄登录已打开，等待重试发布',
+                    status: 'error',
+                    retryAction: () => void publishChapterExternally(),
+                })
+                return
+            }
+            const detail = getApiErrorDetail(detailRaw, err?.message || '一键发布失败')
             addToast('error', '一键发布失败', {
                 context: '番茄发布',
                 detail,
@@ -908,9 +975,16 @@ export default function ChapterWorkbenchPage() {
         } catch (err: any) {
             console.error(err)
             const detailRaw = err?.response?.data?.detail
-            const detail = typeof detailRaw === 'string'
-                ? detailRaw
-                : detailRaw?.message || err?.message || '番茄书本创建失败'
+            if (await handleFanqieLoginRequired(detailRaw, 'create-book', createAndBindFanqieBook, '番茄创建')) {
+                addRecord({
+                    type: 'create',
+                    description: '番茄登录已打开，等待重试创建',
+                    status: 'error',
+                    retryAction: () => void createAndBindFanqieBook(),
+                })
+                return
+            }
+            const detail = getApiErrorDetail(detailRaw, err?.message || '番茄书本创建失败')
             addToast('error', '番茄书本创建失败', {
                 context: '番茄创建',
                 detail,

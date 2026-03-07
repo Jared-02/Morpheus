@@ -2749,6 +2749,10 @@ class FanqieCreateSuggestionRequest(BaseModel):
     prompt: Optional[str] = None
 
 
+class FanqieOpenLoginWindowRequest(BaseModel):
+    flow: str = Field(default="create-book")
+
+
 class GenerationMode(str, Enum):
     STUDIO = "studio"
     QUICK = "quick"
@@ -3013,6 +3017,10 @@ FANQIE_TAG_TAB_ALIASES: Dict[str, str] = {
     "plot": "情节",
 }
 
+FANQIE_LOGIN_REQUIRED_CODE = "FANQIE_LOGIN_REQUIRED"
+FANQIE_LOGIN_REQUIRED_MARKER = "no session cookie found in non-interactive mode"
+FANQIE_LOGIN_URL = "https://fanqienovel.com/main/writer/?enter_from=author_zone"
+
 
 def _normalize_fanqie_tags_by_tab(value: Any) -> Dict[str, List[str]]:
     normalized: Dict[str, List[str]] = {key: [] for key in FANQIE_TAG_TAB_LIMITS}
@@ -3047,6 +3055,70 @@ def _normalize_fanqie_tags_by_tab(value: Any) -> Dict[str, List[str]]:
         if values:
             output[key] = values[:limit]
     return output
+
+
+def _normalize_fanqie_login_flow(value: Any) -> str:
+    candidate = str(value or "").strip().lower()
+    if candidate in {"publish", "publish-chapter", "chapter", "publish_chapter"}:
+        return "publish-chapter"
+    return "create-book"
+
+
+def _is_fanqie_login_required(stdout: str = "", stderr: str = "") -> bool:
+    haystack = f"{stdout}\n{stderr}".lower()
+    return FANQIE_LOGIN_REQUIRED_MARKER in haystack
+
+
+def _fanqie_login_required_detail(
+    flow: str,
+    stdout_tail: str = "",
+    stderr_tail: str = "",
+) -> Dict[str, Any]:
+    return {
+        "message": "请先登录番茄作者后台",
+        "error_code": FANQIE_LOGIN_REQUIRED_CODE,
+        "login_url": FANQIE_LOGIN_URL,
+        "login_flow": _normalize_fanqie_login_flow(flow),
+        "stdout_tail": stdout_tail,
+        "stderr_tail": stderr_tail,
+    }
+
+
+def _raise_if_fanqie_login_required(
+    flow: str,
+    stdout: str = "",
+    stderr: str = "",
+) -> None:
+    if _is_fanqie_login_required(stdout, stderr):
+        raise HTTPException(
+            status_code=401,
+            detail=_fanqie_login_required_detail(
+                flow=flow,
+                stdout_tail=_tail_text(stdout, 5000),
+                stderr_tail=_tail_text(stderr, 5000),
+            ),
+        )
+
+
+def _resolve_fanqie_create_automation_dir() -> Path:
+    return Path(
+        os.getenv(
+            "FANQIE_CREATE_BOOK_AUTOMATION_DIR",
+            os.getenv(
+                "FANQIE_AUTOMATION_DIR",
+                str(BACKEND_ROOT.parent / "automation" / "fanqie-create-book-atomic"),
+            ),
+        )
+    ).expanduser().resolve()
+
+
+def _resolve_fanqie_publish_automation_dir() -> Path:
+    return Path(
+        os.getenv(
+            "FANQIE_AUTOMATION_DIR",
+            str(BACKEND_ROOT.parent / "automation" / "fanqie-playwright"),
+        )
+    ).expanduser().resolve()
 
 
 def _derive_fanqie_role_candidates(project_id: str) -> List[str]:
@@ -3089,7 +3161,7 @@ async def _detect_book_id_via_playwright(automation_dir: Path, timeout_sec: int 
         env=env,
     )
     try:
-        stdout_bytes, _stderr_bytes = await asyncio.wait_for(
+        stdout_bytes, stderr_bytes = await asyncio.wait_for(
             proc.communicate(), timeout=timeout_sec
         )
     except asyncio.TimeoutError:
@@ -3097,6 +3169,9 @@ async def _detect_book_id_via_playwright(automation_dir: Path, timeout_sec: int 
         await proc.wait()
         return ""
     if proc.returncode != 0:
+        stdout = (stdout_bytes or b"").decode("utf-8", errors="replace")
+        stderr = (stderr_bytes or b"").decode("utf-8", errors="replace")
+        _raise_if_fanqie_login_required("publish-chapter", stdout, stderr)
         return ""
 
     stdout = (stdout_bytes or b"").decode("utf-8", errors="replace")
@@ -3126,6 +3201,44 @@ async def _detect_book_id_via_playwright(automation_dir: Path, timeout_sec: int 
             return max(numeric_ids, key=lambda x: int(x))
         return normalized_ids[-1]
     return ""
+
+
+async def _open_fanqie_login_window_process(flow: str) -> Dict[str, Any]:
+    normalized_flow = _normalize_fanqie_login_flow(flow)
+    if normalized_flow == "publish-chapter":
+        automation_dir = _resolve_fanqie_publish_automation_dir()
+        command = ["node", "src/run.js", "open-login"]
+    else:
+        automation_dir = _resolve_fanqie_create_automation_dir()
+        command = ["node", "src/index.js", "open-login"]
+
+    if not automation_dir.exists():
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "message": "Fanqie automation directory not found",
+                "flow": normalized_flow,
+                "automation_dir": str(automation_dir),
+            },
+        )
+
+    env = os.environ.copy()
+    env.pop("FANQIE_NON_INTERACTIVE", None)
+    process = await asyncio.create_subprocess_exec(
+        *command,
+        cwd=str(automation_dir),
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.DEVNULL,
+        env=env,
+        start_new_session=True,
+    )
+    return {
+        "success": True,
+        "flow": normalized_flow,
+        "pid": process.pid,
+        "automation_dir": str(automation_dir),
+        "login_url": FANQIE_LOGIN_URL,
+    }
 
 
 bootstrap_state()
@@ -5673,25 +5786,18 @@ async def review_chapter(req: ReviewRequest):
     return response
 
 
+@app.post("/api/fanqie/open-login-window")
+async def open_fanqie_login_window(req: FanqieOpenLoginWindowRequest):
+    return await _open_fanqie_login_window_process(req.flow)
+
+
 @app.post("/api/projects/{project_id}/fanqie/create-book")
 async def create_fanqie_book(project_id: str, req: ExternalCreateBookRequest):
     project = resolve_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    automation_dir = (
-        Path(
-            os.getenv(
-                "FANQIE_CREATE_BOOK_AUTOMATION_DIR",
-                os.getenv(
-                    "FANQIE_AUTOMATION_DIR",
-                    str((BACKEND_ROOT.parent / "automation" / "fanqie-create-book-atomic")),
-                ),
-            )
-        )
-        .expanduser()
-        .resolve()
-    )
+    automation_dir = _resolve_fanqie_create_automation_dir()
     if not automation_dir.exists():
         raise HTTPException(status_code=500, detail=f"Automation dir not found: {automation_dir}")
 
@@ -5750,8 +5856,8 @@ async def create_fanqie_book(project_id: str, req: ExternalCreateBookRequest):
         env["FANQIE_NON_INTERACTIVE"] = "1"
         proc = await asyncio.create_subprocess_exec(
             "node",
-            "src/run.js",
-            "create-book",
+            "src/index.js",
+            "guided",
             cwd=str(automation_dir),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -5778,6 +5884,7 @@ async def create_fanqie_book(project_id: str, req: ExternalCreateBookRequest):
         success = proc.returncode == 0 and bool(book_id)
 
         if not success:
+            _raise_if_fanqie_login_required("create-book", stdout, stderr)
             logger.error(
                 "external create book failed project_id=%s code=%s stdout_tail=%s stderr_tail=%s",
                 project_id,
@@ -5941,16 +6048,7 @@ async def publish_chapter_external(chapter_id: str, req: ExternalPublishRequest)
         raise HTTPException(status_code=400, detail="No chapter content to publish")
 
     chapter_title = (req.title or f"第{chapter.chapter_number}章 {chapter.title}").strip()
-    automation_dir = (
-        Path(
-            os.getenv(
-                "FANQIE_AUTOMATION_DIR",
-                str((BACKEND_ROOT.parent / "automation" / "fanqie-playwright")),
-            )
-        )
-        .expanduser()
-        .resolve()
-    )
+    automation_dir = _resolve_fanqie_publish_automation_dir()
     if not automation_dir.exists():
         raise HTTPException(status_code=500, detail=f"Automation dir not found: {automation_dir}")
 
@@ -6071,6 +6169,7 @@ async def publish_chapter_external(chapter_id: str, req: ExternalPublishRequest)
         success = proc.returncode == 0 and "publish_article status=200 code=0" in stdout
 
         if not success:
+            _raise_if_fanqie_login_required("publish-chapter", stdout, stderr)
             logger.error(
                 "external publish failed chapter_id=%s code=%s stdout_tail=%s stderr_tail=%s",
                 chapter_id,

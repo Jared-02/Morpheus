@@ -263,6 +263,45 @@ describe('ChapterWorkbenchPage', () => {
         })
     })
 
+    it('未登录时发布章节会自动打开番茄登录窗口', async () => {
+        mockApiPost
+            .mockRejectedValueOnce({
+                response: {
+                    data: {
+                        detail: {
+                            message: '请先登录番茄作者后台',
+                            error_code: 'FANQIE_LOGIN_REQUIRED',
+                            login_flow: 'publish-chapter',
+                        },
+                    },
+                },
+            })
+            .mockResolvedValueOnce({ data: { success: true, flow: 'publish-chapter' } })
+
+        renderPage()
+        await waitFor(() => {
+            expect(screen.getByText('一键发布章节')).toBeTruthy()
+        })
+
+        fireEvent.click(screen.getByText('一键发布章节'))
+
+        await waitFor(() => {
+            expect(mockApiPost).toHaveBeenNthCalledWith(
+                2,
+                '/fanqie/open-login-window',
+                { flow: 'publish-chapter' },
+                expect.objectContaining({ timeout: 15000 }),
+            )
+        })
+        expect(mockAddToast).toHaveBeenCalledWith(
+            'warning',
+            '请先登录番茄作者后台',
+            expect.objectContaining({
+                context: '番茄发布',
+            }),
+        )
+    })
+
     it('显示创建并绑定番茄书本按钮并可触发接口', async () => {
         mockApiPost.mockResolvedValueOnce({ data: { success: true, book_id: '7600000000000000000' } })
         renderPage()
@@ -293,6 +332,45 @@ describe('ChapterWorkbenchPage', () => {
                 expect.objectContaining({ timeout: 300000 }),
             )
         })
+    })
+
+    it('未登录时创建书本会自动打开番茄登录窗口', async () => {
+        mockApiPost
+            .mockRejectedValueOnce({
+                response: {
+                    data: {
+                        detail: {
+                            message: '请先登录番茄作者后台',
+                            error_code: 'FANQIE_LOGIN_REQUIRED',
+                            login_flow: 'create-book',
+                        },
+                    },
+                },
+            })
+            .mockResolvedValueOnce({ data: { success: true, flow: 'create-book' } })
+
+        renderPage()
+        await waitFor(() => {
+            expect(screen.getByText('创建并绑定番茄书本')).toBeTruthy()
+        })
+
+        fireEvent.click(screen.getByText('创建并绑定番茄书本'))
+
+        await waitFor(() => {
+            expect(mockApiPost).toHaveBeenNthCalledWith(
+                2,
+                '/fanqie/open-login-window',
+                { flow: 'create-book' },
+                expect.objectContaining({ timeout: 15000 }),
+            )
+        })
+        expect(mockAddToast).toHaveBeenCalledWith(
+            'warning',
+            '请先登录番茄作者后台',
+            expect.objectContaining({
+                context: '番茄创建',
+            }),
+        )
     })
 
     it('支持LLM填充番茄创建参数', async () => {

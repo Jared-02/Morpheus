@@ -79,6 +79,38 @@ async function runGuided(config, store) {
   }
 }
 
+async function runOpenLogin(config) {
+  const runtime = await launchBrowser(ROOT, {
+    ...config,
+    browser: {
+      ...(config.browser || {}),
+      headless: false,
+    },
+  });
+  const timeoutMs = Math.max(60_000, Number(config?.timeouts?.loginWindowMs || 600_000));
+  const endAt = Date.now() + timeoutMs;
+  try {
+    await runtime.page.goto(config?.urls?.writerHome || 'https://fanqienovel.com/main/writer/?enter_from=author_zone', {
+      waitUntil: 'domcontentloaded',
+      timeout: Number(config?.timeouts?.defaultMs || 15000),
+    });
+    console.log('[info] fanqie login window opened');
+    while (Date.now() < endAt) {
+      const cookies = await runtime.context.cookies('https://fanqienovel.com').catch(() => []);
+      const hasSession = cookies.some((cookie) => ['sessionid', 'sessionid_ss', 'sid_tt'].includes(cookie.name) && cookie.value);
+      if (hasSession) {
+        console.log('[result] login_ready=true');
+        await runtime.page.waitForTimeout(1200);
+        return;
+      }
+      await runtime.page.waitForTimeout(1000);
+    }
+    console.log('[warn] login window timeout without detected session cookie');
+  } finally {
+    await runtime.context.close().catch(() => {});
+  }
+}
+
 async function main() {
   const mode = String(process.argv[2] || 'guided').trim();
   const extraArgs = process.argv.slice(3);
@@ -87,6 +119,11 @@ async function main() {
 
   if (mode === 'guided') {
     await runGuided(config, store);
+    return;
+  }
+
+  if (mode === 'open-login') {
+    await runOpenLogin(config);
     return;
   }
 
