@@ -61,7 +61,7 @@ function normalizeSession(config, payload) {
     ...base,
     ...(payload || {}),
     meta: { ...base.meta, ...((payload && payload.meta) || {}) },
-    input: { ...base.input, ...((payload && payload.input) || {}) },
+    input: { ...((payload && payload.input) || {}), ...base.input },
     preflight: { ...base.preflight, ...((payload && payload.preflight) || {}) },
     detected_ids: { ...base.detected_ids, ...((payload && payload.detected_ids) || {}) },
     artifacts: { ...base.artifacts, ...((payload && payload.artifacts) || {}) },
@@ -98,6 +98,28 @@ function createSessionStore(rootDir, config) {
     const draft = normalizeSession(config, current);
     mutator(draft);
     return save(draft);
+  }
+
+  function startRun(meta = {}) {
+    return update((session) => {
+      const fresh = buildDefaultSession(config);
+      session.meta = {
+        ...session.meta,
+        mode: meta.mode || config?.flow?.mode || session.meta.mode || 'guided',
+        updated_at: new Date().toISOString(),
+      };
+      session.input = fresh.input;
+      session.last_step = '';
+      session.last_result = null;
+      session.page_confirmations = {};
+      session.preflight = fresh.preflight;
+      session.detected_ids = fresh.detected_ids;
+      session.artifacts = {
+        ...fresh.artifacts,
+        result_path: session.artifacts?.result_path || '',
+      };
+      session.binding = fresh.binding;
+    });
   }
 
   function recordStepResult(result) {
@@ -204,6 +226,7 @@ function createSessionStore(rootDir, config) {
     sessionPath,
     setBinding,
     setPreflight,
+    startRun,
     appendDetectedIds,
     update,
     writeResult,

@@ -66,3 +66,21 @@ test('persistBoundBookState writes compatible latestBookId history', () => {
   assert.equal(payload.latestBookId, '7600000000000000009');
   assert.equal(payload.history[0].source, 'bind-book');
 });
+
+test('startRun resets stale runtime state but keeps current config input', () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fanqie-start-run-'));
+  const store = createSessionStore(rootDir, buildConfig(rootDir));
+  store.update((session) => {
+    session.input.title = '雾港十三号';
+    session.detected_ids.latestBookId = '7600000000000000003';
+    session.binding.book_id = '7600000000000000004';
+    session.last_step = 'bind-book';
+  });
+
+  store.startRun({ mode: 'guided' });
+  const reloaded = store.load();
+  assert.equal(reloaded.input.title, '备份神谕');
+  assert.equal(reloaded.detected_ids.latestBookId, '');
+  assert.equal(reloaded.binding.book_id, '');
+  assert.equal(reloaded.last_step, '');
+});

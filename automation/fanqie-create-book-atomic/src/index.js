@@ -40,6 +40,7 @@ async function runStep(stepName, env) {
 }
 
 async function runGuided(config, store) {
+  store.startRun({ mode: 'guided' });
   const runtime = await launchBrowser(ROOT, config);
   try {
     const baseEnv = {
@@ -142,6 +143,11 @@ async function main() {
   }
 
   if (step.needsBrowser === false) {
+    if (stepName === 'bind-book' || stepName === 'detect-existing-books') {
+      // keep current session state for these terminal steps
+    } else if (stepName === 'preflight') {
+      store.startRun({ mode: 'step' });
+    }
     await runStep(stepName, {
       rootDir: ROOT,
       config,
@@ -153,6 +159,9 @@ async function main() {
 
   const runtime = await launchBrowser(ROOT, config);
   try {
+    if (stepName === 'preflight') {
+      store.startRun({ mode: 'step' });
+    }
     await runStep(stepName, {
       rootDir: ROOT,
       config,

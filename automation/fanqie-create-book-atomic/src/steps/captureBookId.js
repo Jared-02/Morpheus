@@ -9,18 +9,21 @@ module.exports = {
     const session = store.load();
     const networkLogPath = session?.artifacts?.network_log_path || '';
     const networkDetected = collectBookIdsFromNetworkLog(networkLogPath);
-    const pageDetected = await collectBookIdsFromPage(page).catch(() => ({ bookIds: [], latestBookId: '' }));
-    const merged = Array.from(new Set([...(networkDetected.bookIds || []), ...(pageDetected.bookIds || []), ...(session?.detected_ids?.bookIds || [])]));
+    const createOk = session?.page_confirmations?.await_submit?.create_ok !== false;
+    const canUsePageScan = !String(page.url() || '').includes('/main/writer/create');
+    const pageDetected = canUsePageScan
+      ? await collectBookIdsFromPage(page).catch(() => ({ bookIds: [], latestBookId: '' }))
+      : { bookIds: [], latestBookId: '' };
+    const merged = Array.from(new Set([...(networkDetected.bookIds || []), ...(pageDetected.bookIds || [])]));
     const latestBookId =
       networkDetected.latestBookId ||
-      pageDetected.latestBookId ||
-      session?.detected_ids?.latestBookId ||
+      (createOk ? pageDetected.latestBookId : '') ||
       '';
 
     const detected = {
       bookIds: merged.sort((a, b) => a.localeCompare(b)),
       latestBookId,
-      source: networkDetected.latestBookId ? 'network-log' : pageDetected.latestBookId ? 'page-scan' : session?.detected_ids?.source || 'session',
+      source: networkDetected.latestBookId ? 'network-log' : pageDetected.latestBookId ? 'page-scan' : '',
       create_response_status: networkDetected.createResponseStatus ?? session?.detected_ids?.create_response_status ?? null,
     };
 

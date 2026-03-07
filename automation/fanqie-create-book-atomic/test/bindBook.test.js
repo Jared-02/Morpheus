@@ -28,3 +28,19 @@ test('resolveBindTarget falls back to detected latest id', () => {
   assert.equal(target.bookId, '7600000000000000007');
   assert.equal(target.source, 'detected-latest');
 });
+
+test('resolveBindTarget prefers detected ids over stale session binding', () => {
+  const target = resolveBindTarget({
+    requestedId: '',
+    session: {
+      binding: {
+        book_id: '7600000000000000001',
+      },
+      detected_ids: {
+        latestBookId: '7600000000000000009',
+      },
+    },
+  });
+  assert.equal(target.bookId, '7600000000000000009');
+  assert.equal(target.source, 'detected-latest');
+});

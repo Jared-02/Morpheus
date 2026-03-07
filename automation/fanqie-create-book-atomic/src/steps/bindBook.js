@@ -6,10 +6,6 @@ function resolveBindTarget({ requestedId, session }) {
   if (/^\d{6,}$/.test(normalizedRequested)) {
     return { bookId: normalizedRequested, source: 'manual-arg' };
   }
-  const sessionBound = String(session?.binding?.book_id || '').trim();
-  if (/^\d{6,}$/.test(sessionBound)) {
-    return { bookId: sessionBound, source: 'session-binding' };
-  }
   const latestDetected = String(session?.detected_ids?.latestBookId || '').trim();
   if (/^\d{6,}$/.test(latestDetected)) {
     return { bookId: latestDetected, source: 'detected-latest' };
@@ -18,6 +14,10 @@ function resolveBindTarget({ requestedId, session }) {
   const firstValid = candidateIds.find((id) => /^\d{6,}$/.test(String(id || '').trim()));
   if (firstValid) {
     return { bookId: String(firstValid), source: 'detected-list' };
+  }
+  const sessionBound = String(session?.binding?.book_id || '').trim();
+  if (/^\d{6,}$/.test(sessionBound)) {
+    return { bookId: sessionBound, source: 'session-binding' };
   }
   return { bookId: '', source: 'none' };
 }
