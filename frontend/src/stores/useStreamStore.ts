@@ -40,6 +40,9 @@ export interface GenerationForm {
     words_per_chapter: number
     auto_approve: boolean
     continuation_mode?: boolean
+    start_chapter_number?: number
+    prompt?: string
+    scope?: string
 }
 
 interface StreamStore {
