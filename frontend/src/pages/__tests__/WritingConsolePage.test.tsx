@@ -258,6 +258,26 @@ describe('WritingConsolePage', () => {
         expect(screen.getByText(/输入创作提示并点击/)).toBeTruthy()
     })
 
+    it('entry=first-chapter 且零章节时显示首章引导', async () => {
+        mockApiGet.mockResolvedValue({ data: [] })
+        renderPage('/project/proj-1/write?entry=first-chapter')
+        await waitFor(() => {
+            expect(screen.getByText('开始你的第一章')).toBeTruthy()
+        })
+        const chapterCountInput = screen.getByLabelText('章节数') as HTMLInputElement
+        expect(chapterCountInput.value).toBe('1')
+    })
+
+    it('entry=first-chapter 但已有章节时不显示引导', async () => {
+        mockApiGet.mockResolvedValue({ data: [{ id: 'ch-1', chapter_number: 1 }] })
+        renderPage('/project/proj-1/write?entry=first-chapter')
+        await waitFor(() => {
+            expect(mockApiGet).toHaveBeenCalled()
+        })
+        expect(screen.queryByText('开始你的第一章')).toBeNull()
+        expect(screen.getByText(/输入创作提示并点击/)).toBeTruthy()
+    })
+
     it('有 chapters 时显示统计信息', () => {
         mockStreamStore.chapters = [
             { id: 'ch-1', chapter_number: 1, title: '序章', status: 'done', word_count: 1500, p0_count: 0 },

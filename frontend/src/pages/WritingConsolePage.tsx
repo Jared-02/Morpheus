@@ -18,6 +18,7 @@ import { useToastStore } from '../stores/useToastStore'
 import { useActivityStore } from '../stores/useActivityStore'
 import { useUIStore } from '../stores/useUIStore'
 import { getStoryTemplateById } from '../config/storyTemplates'
+import { isFirstChapterEntry, clearFirstChapterEntry } from '../utils/firstChapterOnboarding'
 
 /* ── SVG 图标 ── */
 
@@ -171,7 +172,9 @@ export default function WritingConsolePage() {
     const [modeHelpOpen, setModeHelpOpen] = useState(false)
 
     const [advErrors, setAdvErrors] = useState<Record<string, FieldError | null>>({})
+    const [firstChapterMode, setFirstChapterMode] = useState(false)
     const prefillAppliedRef = useRef(false)
+    const firstChapterCheckedRef = useRef(false)
     const settingsLoadedRef = useRef<string | null>(null)
     const settingsHydratedRef = useRef(false)
     const lastSavedSettingsRef = useRef<string | null>(null)
@@ -277,6 +280,28 @@ export default function WritingConsolePage() {
             return next
         }, { replace: true })
     }, [searchParams, setSearchParams])
+
+    /* ── 首章引导模式检测 ── */
+    useEffect(() => {
+        if (firstChapterCheckedRef.current || !projectId) return
+        if (!isFirstChapterEntry(searchParams)) return
+        firstChapterCheckedRef.current = true
+        clearFirstChapterEntry(setSearchParams)
+
+        api.get(`/projects/${projectId}/chapters`)
+            .then((res) => {
+                const list = Array.isArray(res.data) ? res.data : []
+                if (list.length === 0) {
+                    setFirstChapterMode(true)
+                    setForm((prev) => ({ ...prev, chapter_count: 1 }))
+                    setChapterCountInput('1')
+                    addToast('info', '首次创作：已为你预设生成 1 章，填写创作方向后点击「开始生成」即可。')
+                }
+            })
+            .catch(() => {
+                // Ignore — non-critical check
+            })
+    }, [projectId, addToast])
 
     /* ── Escape 退出阅读模式 ── */
     useEffect(() => {
@@ -421,6 +446,7 @@ export default function WritingConsolePage() {
             reportInvalidAdvancedSettings()
             return
         }
+        setFirstChapterMode(false)
         addToast('info', '开始生成，请稍候…')
         start({
             projectId,
@@ -668,6 +694,19 @@ export default function WritingConsolePage() {
                                         {idx < sectionViewModels.length - 1 && <hr />}
                                     </section>
                                 ))
+                            ) : firstChapterMode ? (
+                                <div className="first-chapter-guide">
+                                    <h2 style={{ marginTop: 0 }}>开始你的第一章</h2>
+                                    <p>这是一个全新的项目，还没有任何章节。</p>
+                                    <ol style={{ paddingLeft: '1.2em', lineHeight: 1.8 }}>
+                                        <li>在下方「创作方向」中输入第一章的方向或主题</li>
+                                        <li>选择生成模式（推荐「工作室」模式获得最佳质量）</li>
+                                        <li>点击「开始生成」，AI 将为你创作第一章</li>
+                                    </ol>
+                                    <p className="muted" style={{ fontSize: '0.82rem' }}>
+                                        生成完成后，可前往章节工作台进行细修和审批。
+                                    </p>
+                                </div>
                             ) : (
                                 <p className="placeholder-text">
                                     输入创作提示并点击「开始生成」，这里会实时渲染 Markdown 正文。
