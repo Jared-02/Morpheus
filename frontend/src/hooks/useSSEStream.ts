@@ -304,16 +304,21 @@ export function useSSEStream() {
                 controller.signal,
             )
         } catch (err: any) {
-            flushBuffers()
             if (controller.signal.aborted) {
+                flushBuffers()
                 appendLog('任务已手动终止')
             } else {
+                flushBuffers()
                 const detail = err?.message || '流式任务异常'
                 setError(detail)
                 appendLog(`生成中断：${detail}`)
                 opts.onError?.(detail)
             }
         } finally {
+            if (flushTimer.current !== null) {
+                window.clearTimeout(flushTimer.current)
+                flushTimer.current = null
+            }
             flushBuffers()
             clearBuffers()
             setGenerating(false)
@@ -322,8 +327,25 @@ export function useSSEStream() {
     }, [appendLog, clearBuffers, clearStages, flushBuffers, generating, handleEvent, setChapters, setError, setGenerating, setSections])
 
     const stop = useCallback(() => {
-        abortRef.current?.abort()
-    }, [])
+        // 5-step stop sequence:
+        // 1. Abort the fetch request
+        const ctrl = abortRef.current
+        if (ctrl) {
+            ctrl.abort()
+            abortRef.current = null
+        }
+        // 2. Cancel any pending flush timer
+        if (flushTimer.current !== null) {
+            window.clearTimeout(flushTimer.current)
+            flushTimer.current = null
+        }
+        // 3. Flush any remaining buffered chunks
+        flushBuffers()
+        // 4. Clear chunk buffers
+        clearBuffers()
+        // 5. Mark generation as stopped
+        setGenerating(false)
+    }, [clearBuffers, flushBuffers, setGenerating])
 
     return { start, stop, generating }
 }
