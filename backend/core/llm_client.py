@@ -3,12 +3,13 @@ import time
 import logging
 import json
 import requests
-from typing import List, Optional, Dict, Any, Union, Iterator
+from typing import Any, Callable, Dict, Iterator, List, Optional, Union
 from enum import Enum
 
 
 class LLMProvider(str, Enum):
     DEEPSEEK = "deepseek"
+    OPENAI_COMPATIBLE = "openai_compatible"
 
 
 class LLMConfig:
@@ -25,11 +26,10 @@ class LLMConfig:
         context_window_tokens: Optional[int] = None,
     ):
         self.provider = provider
-        default_key = os.getenv("DEEPSEEK_API_KEY")
-        self.api_key = default_key if api_key is None else api_key
-        self.model = model
         self.embedding_model = embedding_model
         self.embedding_dimension = embedding_dimension
+
+        # Generic defaults
         default_chat_max_tokens = _safe_positive_int(os.getenv("LLM_MAX_TOKENS"), 4000)
         default_chat_temperature = _safe_temperature(os.getenv("LLM_TEMPERATURE"), 0.7)
         default_context_window_tokens = _safe_positive_int(
@@ -37,17 +37,36 @@ class LLMConfig:
             32768,
         )
 
-        self.base_url = base_url or os.getenv("DEEPSEEK_BASE_URL") or "https://api.deepseek.com"
-        self.model = model or "deepseek-chat"
-        default_chat_max_tokens = _safe_positive_int(os.getenv("DEEPSEEK_MAX_TOKENS"), 8192)
-        default_chat_temperature = _safe_temperature(
-            os.getenv("DEEPSEEK_TEMPERATURE"),
-            default_chat_temperature,
-        )
-        default_context_window_tokens = _safe_positive_int(
-            os.getenv("DEEPSEEK_CONTEXT_WINDOW_TOKENS"),
-            131072,
-        )
+        if provider == LLMProvider.OPENAI_COMPATIBLE:
+            default_key = os.getenv("OPENAI_API_KEY")
+            self.base_url = (
+                base_url
+                or os.getenv("OPENAI_BASE_URL")
+                or "https://api.openai.com/v1"
+            )
+            self.model = model or "gpt-4o"
+        else:
+            default_key = os.getenv("DEEPSEEK_API_KEY")
+            self.base_url = (
+                base_url
+                or os.getenv("DEEPSEEK_PROXY_URL")
+                or os.getenv("DEEPSEEK_BASE_URL")
+                or "https://api.deepseek.com"
+            )
+            self.model = model or "deepseek-chat"
+            default_chat_max_tokens = _safe_positive_int(
+                os.getenv("DEEPSEEK_MAX_TOKENS"), 8192
+            )
+            default_chat_temperature = _safe_temperature(
+                os.getenv("DEEPSEEK_TEMPERATURE"),
+                default_chat_temperature,
+            )
+            default_context_window_tokens = _safe_positive_int(
+                os.getenv("DEEPSEEK_CONTEXT_WINDOW_TOKENS"),
+                131072,
+            )
+
+        self.api_key = default_key if api_key is None else api_key
 
         self.chat_max_tokens = _safe_positive_int(
             chat_max_tokens,
@@ -85,6 +104,45 @@ def _safe_temperature(value: Any, fallback: float) -> float:
         return fallback
 
 
+def _estimate_tokens(text: str) -> int:
+    """Rough token estimate: 1 CJK char ~ 1 token, 1 English word ~ 1.3 tokens."""
+    try:
+        import tiktoken
+
+        enc = tiktoken.get_encoding("cl100k_base")
+        return len(enc.encode(text))
+    except Exception:
+        cjk = sum(1 for ch in text if "\u4e00" <= ch <= "\u9fff")
+        ascii_words = len(text.encode("ascii", errors="ignore").split())
+        return cjk + int(ascii_words * 1.3)
+
+
+class UsageInfo:
+    """Token usage report passed to on_usage callbacks."""
+
+    __slots__ = ("prompt_tokens", "completion_tokens", "total_tokens", "estimated")
+
+    def __init__(
+        self,
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+        total_tokens: int = 0,
+        estimated: bool = False,
+    ):
+        self.prompt_tokens = prompt_tokens
+        self.completion_tokens = completion_tokens
+        self.total_tokens = total_tokens or (prompt_tokens + completion_tokens)
+        self.estimated = estimated
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "prompt_tokens": self.prompt_tokens,
+            "completion_tokens": self.completion_tokens,
+            "total_tokens": self.total_tokens,
+            "estimated": self.estimated,
+        }
+
+
 class LLMClient:
     def __init__(self, config: LLMConfig):
         self.config = config
@@ -93,6 +151,18 @@ class LLMClient:
         self._offline_warnings: set[str] = set()
         self._last_chat_meta: Dict[str, Any] = {}
         self._http_timeout = 60
+
+    def _get_openai_client(self):
+        """Lazy-initialize OpenAI SDK client."""
+        if self._client is None:
+            from openai import OpenAI
+
+            self._client = OpenAI(
+                api_key=self.config.api_key,
+                base_url=self.config.base_url,
+                timeout=self._http_timeout,
+            )
+        return self._client
 
     def _set_last_chat_meta(self, **kwargs: Any):
         self._last_chat_meta = dict(kwargs)
@@ -138,33 +208,22 @@ class LLMClient:
         try:
             actual_max_tokens = _safe_positive_int(max_tokens, self.config.chat_max_tokens)
             actual_temperature = _safe_temperature(temperature, self.config.chat_temperature)
-            payload = {
-                "model": self.config.model,
-                "messages": messages,
-                "temperature": actual_temperature,
-                "max_tokens": actual_max_tokens,
-                "stream": bool(stream),
-            }
-            response = requests.post(
-                f"{self.config.base_url}/chat/completions",
-                headers=self._request_headers(),
-                json=payload,
-                timeout=self._http_timeout,
+            client = self._get_openai_client()
+            response = client.chat.completions.create(
+                model=self.config.model,
+                messages=messages,
+                temperature=actual_temperature,
+                max_tokens=actual_max_tokens,
                 stream=bool(stream),
             )
-            response.raise_for_status()
 
             if stream:
                 return response
 
-            body = response.json()
-            content = (
-                ((body.get("choices") or [{}])[0].get("message") or {}).get("content")
-                if isinstance(body, dict)
-                else None
-            )
+            content = response.choices[0].message.content if response.choices else None
             if not isinstance(content, str):
                 raise ValueError("chat response missing content")
+            usage = getattr(response, "usage", None)
             self._set_last_chat_meta(
                 mode="remote",
                 reason="success",
@@ -172,6 +231,7 @@ class LLMClient:
                 model=self.config.model,
                 latency_ms=(time.perf_counter() - started) * 1000,
                 chars=len(content or ""),
+                usage=usage.model_dump() if usage else None,
             )
             self._logger.info(
                 "llm chat remote success provider=%s model=%s latency_ms=%.2f chars=%d",
@@ -202,6 +262,7 @@ class LLMClient:
         messages: List[Dict[str, str]],
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
+        on_usage: Optional[Callable[["UsageInfo"], Any]] = None,
     ) -> Iterator[str]:
         if not self.config.api_key:
             self._warn_offline_once("missing_api_key")
@@ -213,31 +274,22 @@ class LLMClient:
         started = time.perf_counter()
         emitted_chars = 0
         try:
-            response = self.chat(
+            stream_response = self.chat(
                 messages=messages,
                 temperature=temperature,
                 max_tokens=max_tokens,
                 stream=True,
             )
-            if not isinstance(response, requests.Response):
-                raise ValueError("stream response is invalid")
-            for line in response.iter_lines(decode_unicode=True):
-                if not line:
-                    continue
-                raw = line.strip()
-                if not raw.startswith("data:"):
-                    continue
-                data_part = raw[5:].strip()
-                if data_part == "[DONE]":
-                    break
-                try:
-                    payload = json.loads(data_part)
-                except Exception:
-                    continue
-                text = self._extract_stream_delta_text(payload)
+            usage_data = None
+            for chunk in stream_response:
+                text = self._extract_sdk_delta_text(chunk)
                 if text:
                     emitted_chars += len(text)
                     yield text
+                chunk_usage = getattr(chunk, "usage", None)
+                if chunk_usage:
+                    usage_data = chunk_usage
+
             self._logger.info(
                 "llm chat remote stream done provider=%s model=%s latency_ms=%.2f chars=%d",
                 self.config.provider.value,
@@ -245,6 +297,26 @@ class LLMClient:
                 (time.perf_counter() - started) * 1000,
                 emitted_chars,
             )
+
+            if on_usage:
+                if usage_data:
+                    info = UsageInfo(
+                        prompt_tokens=getattr(usage_data, "prompt_tokens", 0) or 0,
+                        completion_tokens=getattr(usage_data, "completion_tokens", 0) or 0,
+                        total_tokens=getattr(usage_data, "total_tokens", 0) or 0,
+                    )
+                else:
+                    prompt_text = " ".join(m.get("content", "") for m in messages)
+                    info = UsageInfo(
+                        prompt_tokens=_estimate_tokens(prompt_text),
+                        completion_tokens=_estimate_tokens("a" * emitted_chars),
+                        estimated=True,
+                    )
+                    info.total_tokens = info.prompt_tokens + info.completion_tokens
+                try:
+                    on_usage(info)
+                except Exception:
+                    self._logger.debug("on_usage callback failed", exc_info=True)
         except Exception as exc:
             self._logger.warning(
                 "llm chat remote stream failed provider=%s model=%s error=%s fallback=offline",
@@ -257,12 +329,12 @@ class LLMClient:
                 yield ch
 
     def embed_text(self, text: str) -> List[float]:
-        return self._embed_deepseek(text)
+        return self._embed_via_api(text)
 
     def embed_batch(self, texts: List[str]) -> List[List[float]]:
-        return self._embed_batch_deepseek(texts)
+        return self._embed_batch_via_api(texts)
 
-    def _embed_deepseek(self, text: str) -> List[float]:
+    def _embed_via_api(self, text: str) -> List[float]:
         if not self.config.api_key:
             self._warn_offline_once("embedding_missing_api_key")
             return self._offline_embedding(text)
@@ -289,7 +361,7 @@ class LLMClient:
             )
             return self._offline_embedding(text)
 
-    def _embed_batch_deepseek(self, texts: List[str]) -> List[List[float]]:
+    def _embed_batch_via_api(self, texts: List[str]) -> List[List[float]]:
         if not self.config.api_key:
             self._warn_offline_once("embedding_batch_missing_api_key")
             return [self._offline_embedding(text) for text in texts]
@@ -321,53 +393,39 @@ class LLMClient:
             return [self._offline_embedding(text) for text in texts]
 
     def _offline_chat(self, messages: List[Dict[str, str]]) -> str:
-        # Keep offline outputs compact and avoid leaking full prompts/context into user-visible drafts.
         user_parts = [m.get("content", "") for m in messages if m.get("role") == "user"]
         payload = user_parts[-1] if user_parts else ""
         instruction = ""
         if payload:
             try:
-                import json
-
                 parsed = json.loads(payload)
                 instruction = str(parsed.get("instruction", "")).strip()
             except Exception:
                 instruction = ""
 
-        if "输出纯正文" in instruction or "最终章节正文" in instruction:
-            return "【离线草稿】寒风掠过长街，主角在雪夜里意识到背叛已成定局。"
-        if "润色" in instruction:
-            return "【离线润色】句式已压缩，氛围与节奏增强，事实设定保持不变。"
-        if "指出本稿可能违反设定" in instruction:
-            return "【离线审校】未连接模型，建议重点核对世界规则、人物状态与时间线。"
+        if "\u8f93\u51fa\u7eaf\u6b63\u6587" in instruction or "\u6700\u7ec8\u7ae0\u8282\u6b63\u6587" in instruction:
+            return "\u3010\u79bb\u7ebf\u8349\u7a3f\u3011\u5bd2\u98ce\u63a0\u8fc7\u957f\u8857\uff0c\u4e3b\u89d2\u5728\u96ea\u591c\u91cc\u610f\u8bc6\u5230\u80cc\u53db\u5df2\u6210\u5b9a\u5c40\u3002"
+        if "\u6da6\u8272" in instruction:
+            return "\u3010\u79bb\u7ebf\u6da6\u8272\u3011\u53e5\u5f0f\u5df2\u538b\u7f29\uff0c\u6c1b\u56f4\u4e0e\u8282\u594f\u589e\u5f3a\uff0c\u4e8b\u5b9e\u8bbe\u5b9a\u4fdd\u6301\u4e0d\u53d8\u3002"
+        if "\u6307\u51fa\u672c\u7a3f\u53ef\u80fd\u8fdd\u53cd\u8bbe\u5b9a" in instruction:
+            return "\u3010\u79bb\u7ebf\u5ba1\u6821\u3011\u672a\u8fde\u63a5\u6a21\u578b\uff0c\u5efa\u8bae\u91cd\u70b9\u6838\u5bf9\u4e16\u754c\u89c4\u5219\u3001\u4eba\u7269\u72b6\u6001\u4e0e\u65f6\u95f4\u7ebf\u3002"
 
-        return "【离线占位输出】未配置可用模型，已返回最小占位结果。"
+        return "\u3010\u79bb\u7ebf\u5360\u4f4d\u8f93\u51fa\u3011\u672a\u914d\u7f6e\u53ef\u7528\u6a21\u578b\uff0c\u5df2\u8fd4\u56de\u6700\u5c0f\u5360\u4f4d\u7ed3\u679c\u3002"
 
-    def _extract_stream_delta_text(self, chunk: Any) -> str:
+    @staticmethod
+    def _extract_sdk_delta_text(chunk: Any) -> str:
+        """Extract text from an OpenAI SDK ChatCompletionChunk."""
         try:
-            choices = chunk.get("choices") if isinstance(chunk, dict) else None
-            if choices:
-                first = choices[0] if isinstance(choices[0], dict) else {}
-                delta = first.get("delta") if isinstance(first, dict) else None
-                if delta is not None:
-                    content = delta.get("content") if isinstance(delta, dict) else None
-                    if isinstance(content, str):
-                        return content
-                    if isinstance(content, list):
-                        parts: List[str] = []
-                        for item in content:
-                            text = item.get("text") if isinstance(item, dict) else None
-                            if isinstance(text, str):
-                                parts.append(text)
-                        return "".join(parts)
-                message = first.get("message") if isinstance(first, dict) else None
-                if message is not None:
-                    msg_content = message.get("content") if isinstance(message, dict) else None
-                    if isinstance(msg_content, str):
-                        return msg_content
+            choices = getattr(chunk, "choices", None)
+            if not choices:
+                return ""
+            delta = getattr(choices[0], "delta", None)
+            if delta is None:
+                return ""
+            content = getattr(delta, "content", None)
+            return content if isinstance(content, str) else ""
         except Exception:
             return ""
-        return ""
 
     def _offline_embedding(self, text: str, dim: Optional[int] = None) -> List[float]:
         import hashlib
@@ -380,13 +438,21 @@ class LLMClient:
         return vector
 
 
+_PROVIDER_MAP = {
+    "deepseek": LLMProvider.DEEPSEEK,
+    "openai": LLMProvider.OPENAI_COMPATIBLE,
+    "openai_compatible": LLMProvider.OPENAI_COMPATIBLE,
+}
+
+
 def create_llm_client(provider: str = "deepseek", **kwargs) -> LLMClient:
     candidate = (provider or "deepseek").strip().lower()
-    if candidate != LLMProvider.DEEPSEEK.value:
+    llm_provider = _PROVIDER_MAP.get(candidate)
+    if llm_provider is None:
         logging.getLogger("novelist.llm").warning(
             "unsupported llm provider=%s fallback=deepseek",
             provider,
         )
-    llm_provider = LLMProvider.DEEPSEEK
+        llm_provider = LLMProvider.DEEPSEEK
     config = LLMConfig(provider=llm_provider, **kwargs)
     return LLMClient(config)
