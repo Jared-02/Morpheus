@@ -1,5 +1,8 @@
 import re
-from typing import Any, Dict, Iterable, List, Optional, Set
+from typing import Any, Dict, Iterable, List, Optional, Set, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from models import Conflict, EntityState, EventEdge
 
 
 _CHAPTER_PREFIX_CN_RE = re.compile(
@@ -464,6 +467,109 @@ def strip_leading_chapter_heading(text: str) -> str:
         lines = lines[1:]
 
     return "\n".join(lines).strip()
+
+
+def build_locked_facts(
+    *,
+    entities: List["EntityState"],
+    events: List["EventEdge"],
+    conflicts: List["Conflict"],
+    current_chapter: int,
+) -> List[str]:
+    """Extract immutable facts from structured entity/event/conflict data.
+
+    These facts represent constraints that generation MUST NOT violate:
+    - Dead or permanently removed characters
+    - Entity-level persistent constraints
+    - High-confidence irreversible events
+    - Unresolved P0 conflicts
+    """
+    facts: List[str] = []
+
+    _DEAD_STATUSES = frozenset({"dead", "deceased", "eliminated", "死亡", "已死"})
+    _UNAVAILABLE_STATUSES = frozenset({"missing", "absent", "sealed", "失踪", "封印"})
+    _IRREVERSIBLE_KEYWORDS = frozenset({"death", "死亡", "消亡", "毁灭", "永久", "不可逆"})
+
+    for entity in entities:
+        status = str(entity.attrs.get("status", "")).strip().lower()
+        if status in _DEAD_STATUSES:
+            facts.append(
+                f"【角色已死亡】{entity.name}（第{entity.last_seen_chapter}章），不得复活或出场"
+            )
+        elif status in _UNAVAILABLE_STATUSES:
+            facts.append(
+                f"【角色不可用】{entity.name} 当前状态「{status}」，不得正常出场"
+            )
+        for constraint in entity.constraints:
+            if constraint.strip():
+                facts.append(f"【{entity.name}·约束】{constraint}")
+
+    for event in events:
+        if event.chapter < current_chapter and event.confidence >= 0.9:
+            if any(kw in (event.relation or "") for kw in _IRREVERSIBLE_KEYWORDS):
+                desc = event.description or event.relation
+                facts.append(f"【不可逆事件·第{event.chapter}章】{desc}")
+
+    for conflict in conflicts:
+        if (
+            conflict.severity.value == "P0"
+            and not conflict.resolved
+            and not conflict.exempted
+        ):
+            facts.append(f"【P0约束】{conflict.reason}")
+
+    return facts
+
+
+def build_setter_constraints(
+    *,
+    entities: List["EntityState"],
+    events: List["EventEdge"],
+    chapter_number: int,
+    beats: List[str],
+    window: int = 3,
+) -> List[str]:
+    """Extract constraints relevant to the current chapter's beats.
+
+    Surfaces only the entity states and recent events that are active
+    within the rolling window, keeping prompt size bounded.
+    """
+    constraints: List[str] = []
+
+    _STATE_KEYS = frozenset({
+        "status", "location", "condition", "ability", "mood",
+        "位置", "状态", "伤势", "能力",
+    })
+
+    active_entities = [
+        e for e in entities
+        if e.last_seen_chapter >= chapter_number - window or e.constraints
+    ]
+
+    for entity in active_entities:
+        state_parts = [
+            f"{k}={v}" for k, v in entity.attrs.items()
+            if k in _STATE_KEYS and v
+        ]
+        if state_parts:
+            constraints.append(
+                f"【{entity.name}·当前状态】{'，'.join(state_parts)}"
+            )
+
+    recent_events = [
+        e for e in events
+        if chapter_number - window <= e.chapter < chapter_number
+    ]
+    for event in recent_events[-10:]:
+        parts = [event.subject, event.relation]
+        if event.object:
+            parts.append(event.object)
+        summary = "".join(parts)
+        if event.description:
+            summary += f"：{event.description}"
+        constraints.append(f"【近期事件·第{event.chapter}章】{summary}")
+
+    return constraints
 
 
 def collapse_blank_lines(text: str, max_consecutive_blank: int = 1) -> str:
