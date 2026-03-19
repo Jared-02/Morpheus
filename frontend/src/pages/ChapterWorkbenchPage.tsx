@@ -998,6 +998,17 @@ export default function ChapterWorkbenchPage() {
         }
     }
 
+    const saveFanqieBookId = async (bookId: string) => {
+        if (!projectId) return
+        try {
+            await api.patch(`/projects/${projectId}`, { fanqie_book_id: bookId || null })
+            void fetchProject(projectId, { force: true })
+            addToast('success', bookId ? `book_id 已更新为 ${bookId}` : 'book_id 已清除')
+        } catch (err: any) {
+            addToast('error', `保存 book_id 失败：${err?.message || '未知错误'}`)
+        }
+    }
+
     const fillFanqieFormWithLLM = async () => {
         if (!projectId) return
         setFillingFanqieByLLM(true)
@@ -1309,8 +1320,24 @@ export default function ChapterWorkbenchPage() {
                                     {publishing ? '发布中...' : '一键发布章节'}
                                 </button>
                             </DisabledTooltip>
-                            <span className="muted" style={{ fontSize: '0.78rem' }}>
-                                当前 book_id：{currentProject?.fanqie_book_id || '未绑定'}
+                            <span className="muted" style={{ fontSize: '0.78rem', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                                book_id：
+                                <input
+                                    type="text"
+                                    className="input"
+                                    style={{ width: 120, fontSize: '0.78rem', padding: '2px 6px' }}
+                                    defaultValue={currentProject?.fanqie_book_id || ''}
+                                    placeholder="未绑定"
+                                    onBlur={(e) => {
+                                        const val = e.target.value.trim()
+                                        if (val !== (currentProject?.fanqie_book_id || '')) {
+                                            void saveFanqieBookId(val)
+                                        }
+                                    }}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+                                    }}
+                                />
                             </span>
                         </div>
                     </div>
