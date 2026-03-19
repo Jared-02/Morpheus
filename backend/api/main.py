@@ -2748,6 +2748,16 @@ class BatchDeleteProjectsRequest(BaseModel):
     project_ids: List[str] = Field(default_factory=list)
 
 
+class UpdateProjectRequest(BaseModel):
+    name: Optional[str] = None
+    genre: Optional[str] = None
+    style: Optional[str] = None
+    synopsis: Optional[str] = None
+    fanqie_book_id: Optional[str] = None
+    target_length: Optional[int] = None
+    taboo_constraints: Optional[List[str]] = None
+
+
 class CreateChapterRequest(BaseModel):
     project_id: str
     chapter_number: int
@@ -3901,6 +3911,26 @@ async def get_project(project_id: str):
         "created_at": project.created_at.isoformat(),
         "updated_at": project.updated_at.isoformat(),
     }
+
+
+@app.patch("/api/projects/{project_id}")
+async def update_project(project_id: str, req: UpdateProjectRequest):
+    project = resolve_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    _UPDATABLE = {"name", "genre", "style", "synopsis", "fanqie_book_id", "target_length", "taboo_constraints"}
+    updates = req.model_dump(exclude_unset=True)
+    for key, value in updates.items():
+        if key in _UPDATABLE:
+            setattr(project, key, value)
+
+    if updates:
+        project.updated_at = datetime.now()
+        save_project(project)
+        projects[project_id] = project
+
+    return {"ok": True, "project_id": project_id}
 
 
 @app.get("/api/projects/{project_id}/chapters")
