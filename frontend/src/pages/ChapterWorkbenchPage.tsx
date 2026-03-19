@@ -1141,7 +1141,7 @@ export default function ChapterWorkbenchPage() {
                     ) : (
                         <div style={{ display: 'grid', gap: 8 }}>
                             {[...storeChapters].sort((a, b) => a.chapter_number - b.chapter_number).map((ch) => (
-                                <button
+                                <button type="button"
                                     key={ch.id}
                                     onClick={() => navigate(`/project/${projectId}/chapter/${ch.id}`)}
                                     className="card clickable-card"
@@ -1244,10 +1244,10 @@ export default function ChapterWorkbenchPage() {
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', width: '100%', flexBasis: '100%' }}>
                         <div className="grid-actions">
-                            <button className="btn btn-secondary" onClick={() => setShowDeleteConfirm(true)} disabled={streaming || deletingChapter}>
+                            <button type="button" className="btn btn-secondary" onClick={() => setShowDeleteConfirm(true)} disabled={streaming || deletingChapter}>
                                 {deletingChapter ? '处理中...' : '删除本章'}
                             </button>
-                            <button className="btn btn-secondary" onClick={enterReadingMode}>
+                            <button type="button" className="btn btn-secondary" onClick={enterReadingMode}>
                                 阅读模式
                             </button>
                             <Link
@@ -1260,6 +1260,7 @@ export default function ChapterWorkbenchPage() {
                         </div>
                         <div className="grid-actions" style={{ marginLeft: 'auto' }}>
                             <button
+                                type="button"
                                 className="btn btn-secondary"
                                 onClick={() => setShowFanqieCreateForm((v) => !v)}
                                 disabled={creatingFanqieBook || fillingFanqieByLLM || streaming}
@@ -1277,6 +1278,7 @@ export default function ChapterWorkbenchPage() {
                                 disabled={creatingFanqieBook || fillingFanqieByLLM || streaming}
                             >
                                 <button
+                                    type="button"
                                     className="btn btn-secondary"
                                     onClick={() => void createAndBindFanqieBook()}
                                     disabled={creatingFanqieBook || fillingFanqieByLLM || streaming}
@@ -1299,7 +1301,7 @@ export default function ChapterWorkbenchPage() {
                                 }
                                 disabled={publishing || streaming || !draftContent.trim()}
                             >
-                                <button
+                                <button type="button"
                                     className="btn btn-primary"
                                     onClick={() => void publishChapterExternally()}
                                     disabled={publishing || streaming || !draftContent.trim()}
@@ -1318,7 +1320,7 @@ export default function ChapterWorkbenchPage() {
                     <section className="card" style={{ padding: 14, marginBottom: 14 }}>
                         <h3 className="section-title" style={{ marginTop: 0, marginBottom: 12 }}>番茄创建参数</h3>
                         <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
-                            <button
+                            <button type="button"
                                 className="btn btn-secondary"
                                 onClick={() => void fillFanqieFormWithLLM()}
                                 disabled={fillingFanqieByLLM || creatingFanqieBook}
@@ -1650,26 +1652,26 @@ export default function ChapterWorkbenchPage() {
 
                         <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                             <span className="metric-label">流式通道</span>
-                            <button
+                            <button type="button"
                                 className={streamChannel === 'arbiter' ? 'btn btn-primary' : 'btn btn-secondary'}
                                 onClick={() => setStreamChannel('arbiter')}
                                 disabled={streaming && streamChannel !== 'arbiter' && draftContent.length === 0}
                             >
                                 终稿
                             </button>
-                            <button
+                            <button type="button"
                                 className={streamChannel === 'director' ? 'btn btn-primary' : 'btn btn-secondary'}
                                 onClick={() => setStreamChannel('director')}
                             >
                                 导演
                             </button>
-                            <button
+                            <button type="button"
                                 className={streamChannel === 'setter' ? 'btn btn-primary' : 'btn btn-secondary'}
                                 onClick={() => setStreamChannel('setter')}
                             >
                                 设定
                             </button>
-                            <button
+                            <button type="button"
                                 className={streamChannel === 'stylist' ? 'btn btn-primary' : 'btn btn-secondary'}
                                 onClick={() => setStreamChannel('stylist')}
                             >
@@ -1714,7 +1716,7 @@ export default function ChapterWorkbenchPage() {
                                 reason={primaryActionReason}
                                 disabled={!canSubmitApproval}
                             >
-                                <button
+                                <button type="button"
                                     className="btn btn-primary"
                                     onClick={() => (isApproved ? reopenReview() : reviewDraft('approve'))}
                                     disabled={!canSubmitApproval}
@@ -1722,7 +1724,7 @@ export default function ChapterWorkbenchPage() {
                                     {primaryActionLabel}
                                 </button>
                             </DisabledTooltip>
-                            <button className="btn btn-secondary" onClick={() => setShowRejectConfirm(true)} disabled={isGenerating}>
+                            <button type="button" className="btn btn-secondary" onClick={() => setShowRejectConfirm(true)} disabled={isGenerating}>
                                 退回重写
                             </button>
                             {p0Conflicts.length > 0 && (
@@ -1771,8 +1773,8 @@ export default function ChapterWorkbenchPage() {
                                 退回后当前草稿将标记为需要重写，此操作不可撤销。
                             </p>
                             <div style={{ display: 'flex', justifyContent: 'center', gap: 10 }}>
-                                <button className="btn btn-secondary" onClick={() => setShowRejectConfirm(false)}>取消</button>
-                                <button className="btn btn-primary" onClick={() => { setShowRejectConfirm(false); reviewDraft('reject') }}>确认退回</button>
+                                <button type="button" className="btn btn-secondary" onClick={() => setShowRejectConfirm(false)}>取消</button>
+                                <button type="button" className="btn btn-primary" onClick={() => { setShowRejectConfirm(false); reviewDraft('reject') }}>确认退回</button>
                             </div>
                         </div>
                     </div>
@@ -1787,10 +1789,10 @@ export default function ChapterWorkbenchPage() {
                                 删除后将返回项目页。如仍需该章节，请回到创作控制台重新生成或在项目页新建章节。
                             </p>
                             <div style={{ display: 'flex', justifyContent: 'center', gap: 10, flexWrap: 'wrap' }}>
-                                <button className="btn btn-secondary" onClick={() => setShowDeleteConfirm(false)} disabled={deletingChapter}>
+                                <button type="button" className="btn btn-secondary" onClick={() => setShowDeleteConfirm(false)} disabled={deletingChapter}>
                                     取消
                                 </button>
-                                <button className="btn btn-primary" onClick={() => void handleDeleteChapter()} disabled={deletingChapter}>
+                                <button type="button" className="btn btn-primary" onClick={() => void handleDeleteChapter()} disabled={deletingChapter}>
                                     {deletingChapter ? '删除中...' : '确认删除'}
                                 </button>
                             </div>
@@ -1807,8 +1809,8 @@ export default function ChapterWorkbenchPage() {
                                 上次编辑的内容尚未保存到服务器，是否恢复？
                             </p>
                             <div style={{ display: 'flex', justifyContent: 'center', gap: 10 }}>
-                                <button className="btn btn-secondary" onClick={handleDiscardDraft}>丢弃草稿</button>
-                                <button className="btn btn-primary" onClick={handleRestoreDraft}>恢复草稿</button>
+                                <button type="button" className="btn btn-secondary" onClick={handleDiscardDraft}>丢弃草稿</button>
+                                <button type="button" className="btn btn-primary" onClick={handleRestoreDraft}>恢复草稿</button>
                             </div>
                         </div>
                     </div>
