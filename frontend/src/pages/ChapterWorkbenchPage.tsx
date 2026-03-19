@@ -365,7 +365,6 @@ export default function ChapterWorkbenchPage() {
     const [loadingPlan, setLoadingPlan] = useState(false)
     const [streaming, setStreaming] = useState(false)
     const [streamingStage, setStreamingStage] = useState<string | null>(null)
-    const [editing, setEditing] = useState(true)
     const [savingDraft, setSavingDraft] = useState(false)
     const [publishing, setPublishing] = useState(false)
     const [creatingFanqieBook, setCreatingFanqieBook] = useState(false)
@@ -383,7 +382,7 @@ export default function ChapterWorkbenchPage() {
     /* ── 自动保存 ── */
     const autoSave = useAutoSave({
         key: `draft-${chapterId}`,
-        content: editing ? draftContent : '',
+        content: draftContent,
         debounceMs: 2000,
     })
     const hasLocalDraft = autoSave.hasDraft
@@ -490,20 +489,19 @@ export default function ChapterWorkbenchPage() {
     useEffect(() => {
         const onKeyDown = (event: KeyboardEvent) => {
             if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 's') return
-            if (!editing || savingDraft || streaming) return
+            if (savingDraft || streaming) return
             event.preventDefault()
             void saveDraft()
         }
         window.addEventListener('keydown', onKeyDown)
         return () => window.removeEventListener('keydown', onKeyDown)
-    }, [editing, savingDraft, streaming, draftContent]) // eslint-disable-line react-hooks/exhaustive-deps
+    }, [savingDraft, streaming, draftContent]) // eslint-disable-line react-hooks/exhaustive-deps
 
     /* ── 草稿恢复处理 ── */
     const handleRestoreDraft = () => {
         const restored = autoSave.restoreDraft()
         if (restored) {
             setDraftContent(restored)
-            setEditing(true)
         }
         setShowDraftRestore(false)
     }
@@ -818,7 +816,6 @@ export default function ChapterWorkbenchPage() {
             const response = await api.put(`/chapters/${chapterId}/draft`, { draft: draftContent })
             setChapter(response.data.chapter)
             setDraftContent(response.data.chapter?.draft ?? draftContent)
-            setEditing(true)
             autoSave.clearDraft()
             if (projectId) {
                 invalidateCache('project', projectId)
@@ -1644,7 +1641,7 @@ export default function ChapterWorkbenchPage() {
                             <button type="button" className="btn btn-secondary" disabled={savingDraft || streaming} onClick={saveDraft}>
                                 {savingDraft ? '保存中...' : '保存编辑并重检'}
                             </button>
-                            {editing && autoSave.lastSaved && (
+                            {autoSave.lastSaved && (
                                 <span className="muted" style={{ fontSize: '0.8rem', alignSelf: 'center' }}>
                                     已自动保存
                                 </span>
