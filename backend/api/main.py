@@ -3418,15 +3418,23 @@ async def repair_projects_health(req: ProjectHealthRepairRequest):
     }
 
 
-@app.get("/api/runtime/llm")
-async def llm_runtime_status():
-    runtime = resolve_llm_runtime()
+def build_runtime_status_payload(runtime: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Build a reusable runtime status dict with chat + embedding sub-structures."""
+    if runtime is None:
+        runtime = resolve_llm_runtime()
+    embed = resolve_embedding_runtime(runtime)
     return {
-        "requested_provider": runtime["requested_provider"],
-        "effective_provider": runtime["effective_provider"],
-        "effective_model": runtime["effective_model"],
-        "effective_base_url": runtime["effective_base_url"],
-        "provider_switch_reason": runtime["provider_switch_reason"],
+        "chat": {
+            "provider": runtime["effective_provider"],
+            "model": runtime["effective_model"],
+            "base_url": runtime["effective_base_url"],
+            "requested_provider": runtime["requested_provider"],
+            "switch_reason": runtime["provider_switch_reason"],
+        },
+        "embedding": {
+            "provider": embed["provider_name"],
+            "base_url": embed["provider_base_url"],
+        },
         "remote_requested": runtime["remote_requested"],
         "remote_effective": runtime["remote_effective"],
         "remote_ready": runtime["remote_ready"],
@@ -3439,6 +3447,32 @@ async def llm_runtime_status():
         "llm_context_window_tokens": settings.llm_context_window_tokens,
         "deepseek_max_tokens": settings.deepseek_max_tokens,
         "deepseek_context_window_tokens": settings.deepseek_context_window_tokens,
+    }
+
+
+@app.get("/api/runtime/llm")
+async def llm_runtime_status():
+    runtime = resolve_llm_runtime()
+    payload = build_runtime_status_payload(runtime)
+    chat = payload["chat"]
+    return {
+        "requested_provider": chat["requested_provider"],
+        "effective_provider": chat["provider"],
+        "effective_model": chat["model"],
+        "effective_base_url": chat["base_url"],
+        "provider_switch_reason": chat["switch_reason"],
+        "remote_requested": payload["remote_requested"],
+        "remote_effective": payload["remote_effective"],
+        "remote_ready": payload["remote_ready"],
+        "remote_auto_enabled": payload["remote_auto_enabled"],
+        "has_openai_key": payload["has_openai_key"],
+        "has_minimax_key": payload["has_minimax_key"],
+        "has_deepseek_key": payload["has_deepseek_key"],
+        "llm_temperature": payload["llm_temperature"],
+        "llm_max_tokens": payload["llm_max_tokens"],
+        "llm_context_window_tokens": payload["llm_context_window_tokens"],
+        "deepseek_max_tokens": payload["deepseek_max_tokens"],
+        "deepseek_context_window_tokens": payload["deepseek_context_window_tokens"],
     }
 
 
