@@ -1,5 +1,6 @@
 import ast
 import json
+import os
 import re
 import time
 import inspect
@@ -142,9 +143,10 @@ AGENT_PROMPTS = {
         "description": "分解章节目标，控制节奏与冲突推进",
         "system_prompt": """你是一位资深小说导演Agent。你的职责是：
 1. 将章节目标拆分为可执行节拍（开场触发→推进对抗→反转/新信息→余震钩子）
-2. 设计“人物主动决策导致代价上升”的关键节点
+2. 设计"人物主动决策导致代价上升"的关键节点
 3. 规划伏笔埋入与局部回收，不得单章终结主线
 4. 给核心角色分配可验证的本章目标
+5. 若上下文包含 previous_chapter_synopsis，开场节拍必须自然承接上一章末尾的未完成动作或场景
 
 输出必须是 JSON 对象，不要解释，不要 Markdown：
 {
@@ -157,11 +159,11 @@ AGENT_PROMPTS = {
 }
 
 要求：
-- beats 3-6条，按时间顺序，且至少包含一次“反转或信息位移”
-- beats 每条必须是“具体事件”，包含角色动作与情境变化，禁止使用抽象流程句
+- beats 3-6条，按时间顺序，且至少包含一次"反转或信息位移"
+- beats 每条必须是"具体事件"，包含角色动作与情境变化，禁止使用抽象流程句
 - conflicts 至少2条，必须有外部阻力与内部价值冲突
 - callback_targets 至少1条，且不可回收全部伏笔
-- 禁止模板句：如“开场建立章节目标”“中段制造冲突”“结尾留下悬念”
+- 禁止模板句：如"开场建立章节目标""中段制造冲突""结尾留下悬念"
 """,
     },
     AgentRole.SETTER: {
@@ -172,6 +174,8 @@ AGENT_PROMPTS = {
 2. 维护角色硬设定（能力边界、性格、背景）
 3. 检查是否有违禁忌约束
 4. 提取本章新设定并记录
+5. 若上下文包含 locked_facts，这些是不可违反的硬约束——如有违反必须明确标记
+6. 若上下文包含 setter_constraints，按本章节拍检查每条约束的适用性
 
 请严格检查一致性，如果发现问题请明确指出。""",
     },
@@ -196,6 +200,18 @@ AGENT_PROMPTS = {
 3. 增强场景描写和氛围
 4. 在不改变事实的前提下提升文字质量
 
+严禁出现以下反模式词汇和句式：
+- "心中暗道""心中不禁""心下一沉""暗自思忖"——用行为/微表情替代心理旁白
+- "XX不由得XX""XX忍不住XX"——改为直接动作描写
+- "仿佛""好似""犹如"连续超过 2 次——减少明喻堆砌
+- "只见""却见""但见"——直接描写所见
+- 同一段落内连续 3 个以上短句使用相同句式结构——变换节奏
+
+风格底线：
+- 对白占比不超过章节正文的 40%
+- 单段不超过 200 字
+- 每 500 字至少一个感官细节（视觉/听觉/触觉/嗅觉）
+
 请在不破坏原有设定和情节的前提下进行润色。""",
     },
     AgentRole.ARBITER: {
@@ -207,11 +223,17 @@ AGENT_PROMPTS = {
 3. 生成最终草稿
 4. 做出最终决策
 
-请权衡各方意见，给出最佳方案。
+分歧裁决优先级：
+- 事实冲突：设定官（Setter）> 文风润色（Stylist）——设定事实不可妥协
+- 风格分歧：文风润色（Stylist）> 导演（Director）——润色Agent拥有文字最终审美权
+- 节奏分歧：导演（Director）> 文风润色（Stylist）——节奏由导演把控
+- 若上下文包含 locked_facts，任何输出均不得违反这些硬约束
+
 输出正文时必须：
-- 只输出小说正文，不要解释，不要标题行（如“第X章”）
+- 只输出小说正文，不要解释，不要标题行（如"第X章"）
 - 保留章节节奏：开场触发、对抗升级、反转或新信息、章尾钩子
 - 不得在单章内解决全部核心矛盾
+- 若上下文包含 continuity_handoff，开篇必须承接上一章末尾场景
 """,
     },
 }
@@ -422,7 +444,7 @@ class StudioWorkflow:
                     "上次蓝图质量不足，请完整重写。"
                     "只允许输出严格 JSON 对象，字段固定为 beats/conflicts/foreshadowing/callback_targets/role_goals。"
                     "beats 必须 3-6 条，每条都要包含具体人物动作与场景推进。"
-                    "禁止使用“开场建立章节目标”“中段制造冲突”“结尾留下悬念”等模板句。"
+                    "禁止使用\u201c开场建立章节目标\u201d\u201c中段制造冲突\u201d\u201c结尾留下悬念\u201d等模板句。"
                     "conflicts 至少 2 条，分别体现外部阻力与内部价值冲突。"
                 ),
             }
@@ -578,7 +600,7 @@ class StudioWorkflow:
                 **draft_context,
                 "instruction": (
                     "请基于计划写出章节初稿，输出纯正文。严格执行 rhythm_hint 的四段节奏，"
-                    "且不得输出“第X章”标题行。"
+                    "且不得输出\u201c第X章\u201d标题行。"
                     f"{length_instruction}"
                 ),
             }
@@ -639,8 +661,41 @@ class StudioWorkflow:
         arbiter_decision.decision_text = final_text
         self.studio.add_decision(arbiter_decision)
 
+        sanitized = self._sanitize_draft(final_text, chapter, plan)
+
+        if os.getenv("DRAFT_QUALITY_SCORING", "").strip().lower() in ("1", "true", "yes"):
+            quality = self._assess_draft_quality(sanitized, chapter, plan, draft_context)
+            chapter.metadata["draft_quality"] = quality
+            if quality["score"] < 60:
+                logger.info(
+                    "draft quality low score=%d chapter=%d, retrying arbiter",
+                    quality["score"],
+                    chapter.chapter_number,
+                )
+                retry_text = await arbiter.think(
+                    {
+                        **draft_context,
+                        "draft": director_text,
+                        "setter_feedback": setter_text,
+                        "stylist_draft": stylist_text,
+                        "quality_feedback": quality,
+                        "instruction": (
+                            "上一稿质量评分不足，请根据 quality_feedback 改进后重新输出最终正文。"
+                            "只输出正文，不要解释，不要标题。"
+                            f"{length_instruction}"
+                        ),
+                    }
+                )
+                sanitized = self._sanitize_draft(retry_text, chapter, plan)
+                retry_quality = self._assess_draft_quality(
+                    sanitized, chapter, plan, draft_context
+                )
+                chapter.metadata["draft_quality"] = retry_quality
+                chapter.metadata["draft_quality_retried"] = True
+                final_text = retry_text
+
         self.studio.set_final_draft(final_text)
-        return self._sanitize_draft(final_text, chapter, plan)
+        return sanitized
 
     async def generate_draft_stream(
         self,
@@ -730,7 +785,7 @@ class StudioWorkflow:
                 **draft_context,
                 "instruction": (
                     "请基于计划写出章节初稿，输出纯正文。严格执行 rhythm_hint 的四段节奏，"
-                    "且不得输出“第X章”标题行。"
+                    "且不得输出\u201c第X章\u201d标题行。"
                     f"{length_instruction}"
                 ),
             },
@@ -1070,7 +1125,7 @@ class StudioWorkflow:
         goal = str(chapter.goal or "").strip()
         if not goal:
             return ""
-        goal = re.sub(r"^围绕[“\"].*?[”\"]推进[：:]\s*", "", goal)
+        goal = re.sub(r"^围绕[\u201c\"].*?[\u201d\"]推进[：:]\s*", "", goal)
         goal = re.sub(r"^围绕.+?推进[：:]\s*", "", goal)
         goal = goal.strip()
         return goal
@@ -1086,15 +1141,15 @@ class StudioWorkflow:
             mid = core
         return [
             f"{start}，但行动刚启动就遭遇意外阻力。",
-            f"为继续推进“{mid[:30]}”，主角必须做出高代价选择。",
+            f"为继续推进\u201c{mid[:30]}\u201d，主角必须做出高代价选择。",
             "章尾暴露新的变量，阶段目标尚未闭合。",
         ]
 
     def _build_goal_based_conflicts(self, chapter: Chapter) -> List[str]:
         core = self._goal_core_text(chapter) or chapter.title or "当前任务"
         return [
-            f"外部：主角推进“{core[:28]}”时，遭遇来自环境或敌对方的强压阻断。",
-            f"内部：主角在达成“{core[:28]}”与守住自身底线之间发生价值撕扯。",
+            f"外部：主角推进\u201c{core[:28]}\u201d时，遭遇来自环境或敌对方的强压阻断。",
+            f"内部：主角在达成\u201c{core[:28]}\u201d与守住自身底线之间发生价值撕扯。",
         ]
 
     def _should_retry_plan(self, quality: Dict[str, Any]) -> bool:
@@ -1115,8 +1170,8 @@ class StudioWorkflow:
             "主角目标与外部阻力发生碰撞",
             "内部价值观冲突抬升",
             "回收上一章未决事项至少一项",
-            "围绕“",
-            '围绕"',
+            "围绕\u201c",
+            "围绕\u201d",
         )
         values: List[str] = []
         for key in ("beats", "conflicts", "foreshadowing", "callback_targets"):
@@ -1269,7 +1324,7 @@ class StudioWorkflow:
             defaulted_fields.append("conflicts")
             source = "goal_fallback"
         if not normalized["foreshadowing"]:
-            normalized["foreshadowing"] = [f"围绕“{chapter.title}”埋下可回收细节"]
+            normalized["foreshadowing"] = [f"围绕\u201c{chapter.title}\u201d埋下可回收细节"]
             defaulted_fields.append("foreshadowing")
         if not normalized["callback_targets"]:
             normalized["callback_targets"] = ["回收上一章未决事项至少一项"]
@@ -1372,3 +1427,72 @@ class StudioWorkflow:
             f" 目标字数约 {bounds['target']}，建议区间 {bounds['ideal_low']}-{bounds['ideal_high']}。"
             f" 低于 {bounds['lower']} 视为信息不足，高于 {bounds['soft_upper']} 视为冗长。"
         )
+
+    def _assess_draft_quality(
+        self,
+        draft: str,
+        chapter: Chapter,
+        plan: ChapterPlan,
+        context: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """5-dimension draft quality assessment (0-100). Returns score + breakdown."""
+        target_words = int(context.get("target_words", 1600) or 1600)
+        text = (draft or "").strip()
+        char_count = len(text)
+
+        # 1. Length compliance (0-20)
+        bounds = compute_length_bounds(target_words)
+        if bounds["ideal_low"] <= char_count <= bounds["ideal_high"]:
+            length_score = 20
+        elif bounds["lower"] <= char_count <= bounds["soft_upper"]:
+            length_score = 14
+        else:
+            length_score = 5
+
+        # 2. Beat coverage (0-20)
+        beats = plan.beats or []
+        if beats:
+            hit = sum(1 for b in beats if any(kw in text for kw in b[:8].split() if len(kw) >= 2))
+            beat_ratio = hit / len(beats) if beats else 0
+            beat_score = int(20 * min(beat_ratio, 1.0))
+        else:
+            beat_score = 10
+
+        # 3. Conflict presence (0-20)
+        plan_conflicts = plan.conflicts or []
+        if plan_conflicts:
+            conflict_hit = sum(
+                1 for c in plan_conflicts
+                if any(kw in text for kw in c[:8].split() if len(kw) >= 2)
+            )
+            conflict_score = int(20 * min(conflict_hit / len(plan_conflicts), 1.0))
+        else:
+            conflict_score = 10
+
+        # 4. Anti-pattern check (0-20)
+        anti_patterns = [
+            "\u5fc3\u4e2d\u6697\u9053", "\u5fc3\u4e0b\u4e00\u6c89",
+            "\u4e0d\u7531\u5f97", "\u5fcd\u4e0d\u4f4f",
+            "\u53ea\u89c1", "\u4f46\u89c1", "\u5374\u89c1",
+        ]
+        pattern_hits = sum(1 for p in anti_patterns if p in text)
+        anti_pattern_score = max(0, 20 - pattern_hits * 4)
+
+        # 5. Continuity (0-20)
+        continuity_score = 20
+        locked_facts = context.get("locked_facts", [])
+        for fact in locked_facts:
+            if "\u89d2\u8272\u5df2\u6b7b\u4ea1" in fact:
+                name = fact.split("\u3011")[-1].split("\uff08")[0].strip()
+                if name and name in text:
+                    continuity_score -= 10
+
+        total = length_score + beat_score + conflict_score + anti_pattern_score + continuity_score
+        return {
+            "score": total,
+            "length": length_score,
+            "beats": beat_score,
+            "conflicts": conflict_score,
+            "anti_patterns": anti_pattern_score,
+            "continuity": continuity_score,
+        }

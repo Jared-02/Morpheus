@@ -125,7 +125,16 @@ class ChapterPlan(BaseModel):
     foreshadowing: List[str] = Field(default_factory=list)
     callback_targets: List[str] = Field(default_factory=list)
     role_goals: Dict[str, str] = Field(default_factory=dict)
+    character_decisions: List["CharacterDecision"] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=datetime.now)
+
+
+class CharacterDecision(BaseModel):
+    character: str
+    beat_index: int = 0
+    choice: str
+    cost: str = ""
+    rejected_alternative: str = ""
 
 
 class PlanQualityReport(BaseModel):
@@ -158,6 +167,7 @@ class Chapter(BaseModel):
     memory_hit_count: int = 0
     p0_conflict_count: int = 0
     conflicts: List[Conflict] = Field(default_factory=list)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
 
