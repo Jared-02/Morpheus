@@ -20,6 +20,8 @@ export interface ProjectItem {
 
 export interface ProjectDetail extends ProjectItem {
     target_length: number
+    synopsis?: string
+    taboo_constraints?: string[]
 }
 
 export interface ProjectCreateForm {
@@ -65,6 +67,7 @@ interface ProjectStore {
     projectsError: string | null
     projectError: string | null
     chaptersError: string | null
+    sessionRevision: number
     _projectsLastFetch: number | null
     _projectLastFetch: Record<string, number>
     _chaptersLastFetch: Record<string, number>
@@ -78,6 +81,8 @@ interface ProjectStore {
     deleteProjects: (ids: string[]) => Promise<BatchDeleteProjectsResult>
     importProject: (file: File) => Promise<{ project_id: string; name: string; chapter_count: number }>
     invalidateCache: (scope: 'projects' | 'project' | 'chapters', id?: string) => void
+    bumpRevision: () => number
+    isActiveSession: (capturedRevision: number) => boolean
 }
 
 function isCacheValid(timestamp: number | null | undefined): boolean {
@@ -180,10 +185,21 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         projectsError: null,
         projectError: null,
         chaptersError: null,
+        sessionRevision: 0,
         _projectsLastFetch: null,
         _projectLastFetch: {},
         _chaptersLastFetch: {},
         _chaptersProjectId: null,
+
+        bumpRevision: () => {
+            const next = get().sessionRevision + 1
+            set({ sessionRevision: next })
+            return next
+        },
+
+        isActiveSession: (capturedRevision: number) => {
+            return get().sessionRevision === capturedRevision
+        },
 
         fetchProjects: async (options?: FetchOptions) => {
             if (!options?.force && isCacheValid(get()._projectsLastFetch)) {
