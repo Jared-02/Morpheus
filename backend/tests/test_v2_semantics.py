@@ -77,7 +77,7 @@ class V2SemanticsTest(unittest.TestCase):
         self.assertEqual(payload["generated_chapters"], 1)
         self.assertEqual(payload["prompt"], "主角在雪夜被背叛后潜伏反击，最终揪出幕后主使。")
 
-    def test_one_shot_book_rejects_legacy_scope_field(self):
+    def test_one_shot_book_accepts_scope_field(self):
         create_res = self.client.post(
             "/api/projects",
             json={
@@ -94,16 +94,16 @@ class V2SemanticsTest(unittest.TestCase):
         batch_res = self.client.post(
             f"/api/projects/{project_id}/one-shot-book",
             json={
-                "batch_direction": "测试旧字段是否被拒绝。",
+                "batch_direction": "测试scope字段可接受。",
                 "scope": "volume",
                 "mode": "quick",
                 "chapter_count": 1,
                 "words_per_chapter": 700,
             },
         )
-        self.assertEqual(batch_res.status_code, 422)
+        self.assertEqual(batch_res.status_code, 200)
 
-    def test_one_shot_book_rejects_explicit_start_chapter_number(self):
+    def test_one_shot_book_ignores_unknown_start_chapter_number(self):
         create_res = self.client.post(
             "/api/projects",
             json={
@@ -120,14 +120,14 @@ class V2SemanticsTest(unittest.TestCase):
         batch_res = self.client.post(
             f"/api/projects/{project_id}/one-shot-book",
             json={
-                "batch_direction": "测试旧字段是否被拒绝。",
+                "batch_direction": "测试未知字段被忽略。",
                 "mode": "quick",
                 "chapter_count": 1,
                 "words_per_chapter": 700,
                 "start_chapter_number": 99,
             },
         )
-        self.assertEqual(batch_res.status_code, 422)
+        self.assertEqual(batch_res.status_code, 200)
 
 
 if __name__ == "__main__":
