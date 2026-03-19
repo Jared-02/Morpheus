@@ -27,8 +27,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from agents.studio import AGENT_PROMPTS, AgentStudio, StudioWorkflow
 from core.chapter_craft import (
+    build_locked_facts,
     build_micro_arc_hint,
     build_outline_phase_hints,
+    build_setter_constraints,
     collapse_blank_lines,
     compute_length_bounds,
     derive_title_from_goal,
@@ -618,6 +620,8 @@ def sync_project_chapters_from_disk(project_id: str) -> None:
 
     for chapter_id, disk_chapter in disk_chapters.items():
         cached = chapters.get(chapter_id)
+        if not isinstance(cached, Chapter):
+            cached = None
         if (
             cached
             and cached.project_id == project_id
@@ -629,6 +633,8 @@ def sync_project_chapters_from_disk(project_id: str) -> None:
 
 def resolve_chapter(chapter_id: str) -> Optional[Chapter]:
     chapter = chapters.get(chapter_id)
+    if chapter is not None and not isinstance(chapter, Chapter):
+        chapter = None
     if chapter:
         if not resolve_project(chapter.project_id):
             chapters.pop(chapter_id, None)
@@ -1643,6 +1649,7 @@ def build_outline_messages(
     project: Project,
     identity: str,
     continuation_mode: bool = False,
+    batch_direction: Optional[str] = None,
 ) -> List[Dict[str, str]]:
     phase_hints = build_outline_phase_hints(chapter_count, continuation_mode)
     constraints = [
@@ -1657,7 +1664,7 @@ def build_outline_messages(
     ]
     if continuation_mode:
         constraints.extend(build_serial_continuation_constraints())
-    return [
+    result = [
         {
             "role": "system",
             "content": (
@@ -1698,6 +1705,11 @@ def build_outline_messages(
             ),
         },
     ]
+    if batch_direction:
+        result[-1]["content"] += (
+            f"\n\n用户对这批章节的创作方向要求：{batch_direction}\n请在拆章和内容生成时参考此方向。"
+        )
+    return result
 
 
 def build_chapter_outline(
@@ -1710,6 +1722,7 @@ def build_chapter_outline(
     continuation_mode: bool = False,
     start_chapter_number: int = 1,
     existing_titles: Optional[List[str]] = None,
+    batch_direction: Optional[str] = None,
 ) -> List[Dict[str, str]]:
     identity = store.three_layer.get_identity()[:2500]
     messages = build_outline_messages(
@@ -1718,6 +1731,7 @@ def build_chapter_outline(
         project=project,
         identity=identity,
         continuation_mode=continuation_mode,
+        batch_direction=batch_direction,
     )
     raw = studio.llm_client.chat(
         messages,
@@ -1854,6 +1868,43 @@ def build_one_shot_messages(
         continuation_mode=req.continuation_mode,
     )
     length_bounds = compute_length_bounds(req.target_words)
+
+    prev_synopsis = (context_pack or {}).get("previous_chapter_synopsis", "")
+    continuity_handoff = ""
+    if chapter.chapter_number > 1 and prev_synopsis:
+        continuity_handoff = (
+            "【承接指令】本章开篇必须自然承接上一章最后的场景/动作/对白，"
+            "不得跳过未完成的情节或凭空切换场景。"
+        )
+
+    user_payload: Dict[str, Any] = {
+        "mode": req.mode.value,
+        "instruction": mode_instruction,
+        "chapter_number": chapter.chapter_number,
+        "chapter_title": chapter.title,
+        "chapter_goal": chapter.goal,
+        "one_line_premise": premise,
+        "target_words": req.target_words,
+        "length_bounds": length_bounds,
+        "rhythm_hint": rhythm_hint,
+        "project_style": project.style,
+        "taboo_constraints": project.taboo_constraints,
+        "identity": store.three_layer.get_identity()[:2000],
+        "previous_chapter_synopsis": prev_synopsis,
+        "open_threads": (context_pack or {}).get("open_threads", []),
+        "previous_chapters": previous_chapters,
+        "continuation_mode": req.continuation_mode,
+        "continuation_constraints": continuation_constraints,
+    }
+    if continuity_handoff:
+        user_payload["continuity_handoff"] = continuity_handoff
+
+    generation_constraints = _build_generation_constraints(store, chapter)
+    if generation_constraints.get("locked_facts"):
+        user_payload["locked_facts"] = generation_constraints["locked_facts"]
+    if generation_constraints.get("setter_constraints"):
+        user_payload["setter_constraints"] = generation_constraints["setter_constraints"]
+
     return [
         {
             "role": "system",
@@ -1861,35 +1912,12 @@ def build_one_shot_messages(
                 "你是中文长篇小说写作助手。请只输出章节正文，不要输出解释、JSON、标题栏、提示词。"
                 "必须遵守世界规则与禁忌约束，保持人物行为一致。"
                 "若为续写模式，不得在单章内结束全书主线，章尾必须保留下一章触发点。"
-                "正文不得包含“第X章/Chapter X”标题行。"
+                "正文不得包含\u201c第X章/Chapter X\u201d标题行。"
             ),
         },
         {
             "role": "user",
-            "content": json.dumps(
-                {
-                    "mode": req.mode.value,
-                    "instruction": mode_instruction,
-                    "chapter_number": chapter.chapter_number,
-                    "chapter_title": chapter.title,
-                    "chapter_goal": chapter.goal,
-                    "one_line_premise": premise,
-                    "target_words": req.target_words,
-                    "length_bounds": length_bounds,
-                    "rhythm_hint": rhythm_hint,
-                    "project_style": project.style,
-                    "taboo_constraints": project.taboo_constraints,
-                    "identity": store.three_layer.get_identity()[:2000],
-                    "previous_chapter_synopsis": (context_pack or {}).get(
-                        "previous_chapter_synopsis", ""
-                    ),
-                    "open_threads": (context_pack or {}).get("open_threads", []),
-                    "previous_chapters": previous_chapters,
-                    "continuation_mode": req.continuation_mode,
-                    "continuation_constraints": continuation_constraints,
-                },
-                ensure_ascii=False,
-            ),
+            "content": json.dumps(user_payload, ensure_ascii=False),
         },
     ]
 
@@ -2176,6 +2204,28 @@ def compact_previous_chapters(previous: List[str], max_total_chars: int) -> List
     return kept
 
 
+def _build_generation_constraints(
+    store: MemoryStore, chapter: "Chapter",
+) -> Dict[str, List[str]]:
+    """Build locked_facts and setter_constraints for draft generation context."""
+    entities = store.get_all_entities() if settings.graph_feature_enabled else []
+    events = store.get_all_events() if settings.graph_feature_enabled else []
+    return {
+        "locked_facts": build_locked_facts(
+            entities=entities,
+            events=events,
+            conflicts=chapter.conflicts,
+            current_chapter=chapter.chapter_number,
+        ),
+        "setter_constraints": build_setter_constraints(
+            entities=entities,
+            events=events,
+            chapter_number=chapter.chapter_number,
+            beats=chapter.plan.beats if chapter.plan else [],
+        ),
+    }
+
+
 def _normalize_title_for_compare(value: str) -> str:
     text = strip_chapter_prefix(str(value or ""))
     text = text.strip()
@@ -2405,7 +2455,7 @@ def finalize_generated_draft(
         mem_ctx.refresh_memory_after_chapter(
             chapter_number=chapter.chapter_number,
             chapter_text=draft,
-            chapter_plan=chapter.plan,
+            chapter_plan=chapter.plan.model_dump(mode="json") if chapter.plan else None,
             project_chapters=project_chapters,
             mode="lightweight",
         )
@@ -2563,6 +2613,7 @@ async def generate_one_shot_draft_text(
                 max_total_chars=int(input_budget * 0.55),
             ),
         }
+        draft_context.update(_build_generation_constraints(store, chapter))
         if stream_chunk:
             draft = await workflow.generate_draft_stream(
                 chapter,
@@ -2773,8 +2824,6 @@ class ChapterDirectionRequest(BaseModel):
 
 
 class OneShotBookRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
     prompt: str = ""
     batch_direction: Optional[str] = None
     mode: GenerationMode = GenerationMode.STUDIO
@@ -2782,6 +2831,7 @@ class OneShotBookRequest(BaseModel):
     words_per_chapter: int = Field(default=1600, ge=300, le=12000)
     auto_approve: bool = False
     continuation_mode: bool = False
+    scope: Optional[str] = None
 
     @model_validator(mode="after")
     def apply_batch_direction_alias(self):
@@ -3883,6 +3933,9 @@ async def list_chapters(project_id: str):
             "status": chapter.status.value,
             "word_count": chapter.word_count,
             "conflict_count": len(chapter.conflicts),
+            "has_persisted_content": bool(
+                str(chapter.final or chapter.draft or "").strip()
+            ),
             "updated_at": chapter.updated_at.isoformat(),
         }
         for chapter in chapter_list(project_id)
@@ -3942,6 +3995,7 @@ async def run_one_shot_book_generation(
         continuation_mode=req.continuation_mode,
         start_chapter_number=next_number,
         existing_titles=existing_titles,
+        batch_direction=req.batch_direction,
     )
     await emit_progress(
         progress,
@@ -4211,7 +4265,7 @@ async def run_one_shot_book_generation(
                 mem_ctx.refresh_memory_after_chapter(
                     chapter_number=chapter.chapter_number,
                     chapter_text=chapter.final or "",
-                    chapter_plan=chapter.plan,
+                    chapter_plan=chapter.plan.model_dump(mode="json") if chapter.plan else None,
                     project_chapters=project_chapters,
                     mode="consolidated",
                 )
@@ -4676,21 +4730,26 @@ async def generate_plan(chapter_id: str, req: Optional[ChapterDirectionRequest] 
     context_pack = mem_ctx.build_generation_context_pack(chapter.chapter_number, project_chapters)
 
     direction_hint = (req.direction_hint if req else None) or ""
+
+    plan_context: Dict[str, Any] = {
+        "project_info": project.model_dump(mode="json"),
+        "previous_chapters": [
+            c.model_dump(mode="json")
+            for c in chapter_list(chapter.project_id)
+            if c.chapter_number < chapter.chapter_number
+        ],
+        "context_pack": context_pack,
+    }
     if direction_hint.strip():
-        chapter.goal = direction_hint.strip()
+        plan_context["direction_hint"] = (
+            f"用户对本章的修改方向要求：{direction_hint.strip()}\n"
+            "请在保持故事连贯性的前提下，按照用户的修改意图重新生成内容。"
+        )
 
     try:
         plan = await workflow.generate_plan(
             chapter,
-            {
-                "project_info": project.model_dump(mode="json"),
-                "previous_chapters": [
-                    c.model_dump(mode="json")
-                    for c in chapter_list(chapter.project_id)
-                    if c.chapter_number < chapter.chapter_number
-                ],
-                "context_pack": context_pack,
-            },
+            plan_context,
         )
     except RuntimeError as exc:
         logger.warning(
@@ -5051,24 +5110,26 @@ async def _generate_draft_internal(chapter_id: str, force: bool = False) -> Dict
         chapter.chapter_number, project_chapters
     )
 
+    _draft_ctx = {
+        "identity": context_pack.get("identity_core") or store.three_layer.get_identity(),
+        "runtime_state": context_pack.get("runtime_state", ""),
+        "memory_compact": context_pack.get("memory_compact", ""),
+        "previous_chapter_synopsis": context_pack.get("previous_chapter_synopsis", ""),
+        "open_threads": context_pack.get("open_threads", []),
+        "project_style": project.style,
+        "target_words": target_words,
+        "previous_chapters": context_pack.get("previous_chapters_compact")
+        or [
+            c.final or c.draft or ""
+            for c in chapter_list(chapter.project_id)
+            if c.chapter_number < chapter.chapter_number
+        ][-5:],
+    }
+    _draft_ctx.update(_build_generation_constraints(store, chapter))
     draft = await workflow.generate_draft(
         chapter,
         chapter.plan,
-        {
-            "identity": context_pack.get("identity_core") or store.three_layer.get_identity(),
-            "runtime_state": context_pack.get("runtime_state", ""),
-            "memory_compact": context_pack.get("memory_compact", ""),
-            "previous_chapter_synopsis": context_pack.get("previous_chapter_synopsis", ""),
-            "open_threads": context_pack.get("open_threads", []),
-            "project_style": project.style,
-            "target_words": target_words,
-            "previous_chapters": context_pack.get("previous_chapters_compact")
-            or [
-                c.final or c.draft or ""
-                for c in chapter_list(chapter.project_id)
-                if c.chapter_number < chapter.chapter_number
-            ][-5:],
-        },
+        _draft_ctx,
     )
     draft = await rebalance_draft_length_if_needed(
         llm_client=studio.llm_client,
@@ -5208,24 +5269,26 @@ async def _generate_draft_internal_stream(
             "chapter_number": chapter.chapter_number,
         },
     )
+    _stream_draft_ctx = {
+        "identity": context_pack.get("identity_core") or store.three_layer.get_identity(),
+        "runtime_state": context_pack.get("runtime_state", ""),
+        "memory_compact": context_pack.get("memory_compact", ""),
+        "previous_chapter_synopsis": context_pack.get("previous_chapter_synopsis", ""),
+        "open_threads": context_pack.get("open_threads", []),
+        "project_style": project.style,
+        "target_words": target_words,
+        "previous_chapters": context_pack.get("previous_chapters_compact")
+        or [
+            c.final or c.draft or ""
+            for c in chapter_list(chapter.project_id)
+            if c.chapter_number < chapter.chapter_number
+        ][-5:],
+    }
+    _stream_draft_ctx.update(_build_generation_constraints(store, chapter))
     draft = await workflow.generate_draft_stream(
         chapter,
         chapter.plan,
-        {
-            "identity": context_pack.get("identity_core") or store.three_layer.get_identity(),
-            "runtime_state": context_pack.get("runtime_state", ""),
-            "memory_compact": context_pack.get("memory_compact", ""),
-            "previous_chapter_synopsis": context_pack.get("previous_chapter_synopsis", ""),
-            "open_threads": context_pack.get("open_threads", []),
-            "project_style": project.style,
-            "target_words": target_words,
-            "previous_chapters": context_pack.get("previous_chapters_compact")
-            or [
-                c.final or c.draft or ""
-                for c in chapter_list(chapter.project_id)
-                if c.chapter_number < chapter.chapter_number
-            ][-5:],
-        },
+        _stream_draft_ctx,
         on_stage_chunk=stream_chunk,
         on_stage=on_stage,
     )
@@ -5500,7 +5563,7 @@ async def commit_memory(req: MemoryCommitRequest):
         mem_ctx.refresh_memory_after_chapter(
             chapter_number=chapter.chapter_number,
             chapter_text=chapter.final,
-            chapter_plan=chapter.plan,
+            chapter_plan=chapter.plan.model_dump(mode="json") if chapter.plan else None,
             project_chapters=project_chapters,
             mode="consolidated",
         )
@@ -5701,7 +5764,7 @@ async def review_chapter(req: ReviewRequest):
         p0_conflicts = [
             conflict
             for conflict in chapter.conflicts
-            if conflict.severity.value == "P0" and not conflict.exempted
+            if conflict.severity.value == "P0" and not conflict.exempted and not conflict.resolved
         ]
         if p0_conflicts:
             conflict_log = _conflict_log_fields(chapter.conflicts)
@@ -5718,42 +5781,53 @@ async def review_chapter(req: ReviewRequest):
         if chapter.final:
             store = get_or_create_store(chapter.project_id)
 
-            # Memory context: consolidated refresh after approval (includes reflect)
-            try:
-                mem_ctx = MemoryContextService(store.three_layer, store)
-                project_chapters = [
-                    {
-                        "chapter_number": c.chapter_number,
-                        "plan": c.plan,
-                        "draft": c.draft,
-                        "final": c.final,
-                    }
-                    for c in chapter_list(chapter.project_id)
-                ]
-                mem_ctx.refresh_memory_after_chapter(
-                    chapter_number=chapter.chapter_number,
-                    chapter_text=chapter.final,
-                    chapter_plan=chapter.plan,
-                    project_chapters=project_chapters,
-                    mode="consolidated",
-                )
-            except Exception:
-                logger.warning(
-                    "consolidated memory refresh failed chapter_no=%d",
-                    chapter.chapter_number,
-                    exc_info=True,
-                )
+            # Non-blocking side effects: memory refresh + L4 extraction
+            _final_text = chapter.final
+            _chapter_number = chapter.chapter_number
+            _project_id = chapter.project_id
+            _chapter_plan = chapter.plan.model_dump(mode="json") if chapter.plan else None
+            _project_chapters = [
+                {
+                    "chapter_number": c.chapter_number,
+                    "plan": c.plan,
+                    "draft": c.draft,
+                    "final": c.final,
+                }
+                for c in chapter_list(chapter.project_id)
+            ]
 
-            # L4: auto-extract character profiles after chapter approval
-            try:
-                trigger_l4_extraction_async(
-                    store=store,
-                    chapter_text=chapter.final,
-                    chapter_number=chapter.chapter_number,
-                    project_id=chapter.project_id,
-                )
-            except Exception:
-                logger.warning("L4 trigger failed chapter_id=%s", chapter.id, exc_info=True)
+            async def _bg_memory_refresh():
+                try:
+                    mem_ctx = MemoryContextService(store.three_layer, store)
+                    await asyncio.to_thread(
+                        mem_ctx.refresh_memory_after_chapter,
+                        chapter_number=_chapter_number,
+                        chapter_text=_final_text,
+                        chapter_plan=_chapter_plan,
+                        project_chapters=_project_chapters,
+                        mode="consolidated",
+                    )
+                except Exception:
+                    logger.warning(
+                        "consolidated memory refresh failed chapter_no=%d",
+                        _chapter_number,
+                        exc_info=True,
+                    )
+
+            async def _bg_l4_extraction():
+                try:
+                    await asyncio.to_thread(
+                        trigger_l4_extraction_async,
+                        store=store,
+                        chapter_text=_final_text,
+                        chapter_number=_chapter_number,
+                        project_id=_project_id,
+                    )
+                except Exception:
+                    logger.warning("L4 trigger failed chapter_no=%d", _chapter_number, exc_info=True)
+
+            asyncio.create_task(_bg_memory_refresh())
+            asyncio.create_task(_bg_l4_extraction())
     elif req.action == ReviewAction.REJECT:
         chapter.status = ChapterStatus.DRAFT
     elif req.action == ReviewAction.REWRITE:
@@ -5761,10 +5835,27 @@ async def review_chapter(req: ReviewRequest):
         chapter.draft = None
     elif req.action == ReviewAction.RESCAN:
         chapter.status = ChapterStatus.REVIEWING
-        consistency = _recompute_chapter_consistency(chapter, project)
+        draft_text = str(chapter.draft or "").strip()
+        if draft_text:
+            consistency = _recompute_chapter_consistency(chapter, project)
+        else:
+            chapter.conflicts = []
+            chapter.p0_conflict_count = 0
+            consistency = {
+                "can_submit": True,
+                "total_conflicts": 0,
+                "p0_count": 0,
+                "p1_count": 0,
+                "p2_count": 0,
+                "conflicts": [],
+                "p0_conflicts": [],
+                "p1_conflicts": [],
+                "p2_conflicts": [],
+            }
     elif req.action == ReviewAction.EXEMPT:
         if not P0_EXEMPTION_ALLOWED and any(
-            conflict.severity.value == "P0" for conflict in chapter.conflicts
+            conflict.severity.value == "P0" and not conflict.resolved
+            for conflict in chapter.conflicts
         ):
             raise HTTPException(status_code=400, detail=P0_EXEMPT_BLOCK_MESSAGE)
         for conflict in chapter.conflicts:
