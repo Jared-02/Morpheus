@@ -563,6 +563,15 @@ class StudioWorkflow:
             "previous_chapters": context.get("previous_chapters", []),
             "rhythm_hint": rhythm_hint,
         }
+        if context.get("locked_facts"):
+            draft_context["locked_facts"] = context["locked_facts"]
+        if context.get("setter_constraints"):
+            draft_context["setter_constraints"] = context["setter_constraints"]
+        if chapter.chapter_number > 1 and context.get("previous_chapter_synopsis"):
+            draft_context["continuity_handoff"] = (
+                "【承接指令】本章开篇必须自然承接上一章最后的场景/动作/对白，"
+                "不得跳过未完成的情节或凭空切换场景。"
+            )
 
         director_text = await director.think(
             {
@@ -685,6 +694,15 @@ class StudioWorkflow:
             "previous_chapters": context.get("previous_chapters", []),
             "rhythm_hint": rhythm_hint,
         }
+        if context.get("locked_facts"):
+            draft_context["locked_facts"] = context["locked_facts"]
+        if context.get("setter_constraints"):
+            draft_context["setter_constraints"] = context["setter_constraints"]
+        if chapter.chapter_number > 1 and context.get("previous_chapter_synopsis"):
+            draft_context["continuity_handoff"] = (
+                "【承接指令】本章开篇必须自然承接上一章最后的场景/动作/对白，"
+                "不得跳过未完成的情节或凭空切换场景。"
+            )
 
         async def emit_stage_chunk(channel: str, text: str):
             if not text:
