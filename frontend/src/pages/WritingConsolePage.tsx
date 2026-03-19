@@ -12,7 +12,7 @@ import AgentProgressBar from '../components/chapter/AgentProgressBar'
 import ReadingModeView from '../components/ui/ReadingModeView'
 import type { ChapterContent } from '../services/exportService'
 import { useSSEStream } from '../hooks/useSSEStream'
-import { useStreamStore, type GenerationForm, type StreamChapter, type StreamSection } from '../stores/useStreamStore'
+import { useStreamStore, type GenerationForm, type StreamChapter } from '../stores/useStreamStore'
 import { useProjectStore } from '../stores/useProjectStore'
 import { useToastStore } from '../stores/useToastStore'
 import { useActivityStore } from '../stores/useActivityStore'
@@ -46,28 +46,6 @@ type PersistedWritingSettings = Pick<
     'mode' | 'chapter_count' | 'words_per_chapter' | 'auto_approve'
 >
 
-type ChapterPlanDraft = {
-    beats: string[]
-    conflicts: string[]
-    foreshadowing: string[]
-    callbackTargets: string[]
-    roleGoals: Array<{ role: string; goal: string }>
-}
-
-type ParsedSectionBody = {
-    narrative: string
-    plan: ChapterPlanDraft | null
-}
-
-type SectionViewModel = StreamSection & {
-    narrativeBody: string
-    planDraft: ChapterPlanDraft | null
-    displayBody: string
-    exportBody: string
-}
-
-const PLAN_DRAFT_KEYS = ['beats', 'conflicts', 'foreshadowing', 'callback_targets', 'role_goals'] as const
-
 function isDigitsOnly(value: string) {
     return /^\d*$/.test(value)
 }
@@ -98,87 +76,6 @@ function normalizePersistedSettings(raw: unknown): PersistedWritingSettings | nu
     }
 }
 
-function normalizeDraftText(value: unknown): string {
-    return String(value ?? '')
-        .replace(/\s+/g, ' ')
-        .trim()
-}
-
-function normalizeDraftList(value: unknown): string[] {
-    if (!Array.isArray(value)) return []
-    return value.map((item) => normalizeDraftText(item)).filter(Boolean)
-}
-
-function normalizeRoleGoals(value: unknown): Array<{ role: string; goal: string }> {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) return []
-    const record = value as Record<string, unknown>
-    return Object.entries(record)
-        .map(([role, goal]) => ({
-            role: normalizeDraftText(role),
-            goal: normalizeDraftText(goal),
-        }))
-        .filter((entry) => entry.role.length > 0 && entry.goal.length > 0)
-}
-
-function normalizePlanDraft(raw: unknown): ChapterPlanDraft | null {
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
-    const record = raw as Record<string, unknown>
-    const matchedKeys = PLAN_DRAFT_KEYS.filter((key) => Object.prototype.hasOwnProperty.call(record, key))
-    if (matchedKeys.length < 2) return null
-
-    const plan: ChapterPlanDraft = {
-        beats: normalizeDraftList(record.beats),
-        conflicts: normalizeDraftList(record.conflicts),
-        foreshadowing: normalizeDraftList(record.foreshadowing),
-        callbackTargets: normalizeDraftList(record.callback_targets),
-        roleGoals: normalizeRoleGoals(record.role_goals),
-    }
-    const hasAnyContent =
-        plan.beats.length > 0
-        || plan.conflicts.length > 0
-        || plan.foreshadowing.length > 0
-        || plan.callbackTargets.length > 0
-        || plan.roleGoals.length > 0
-
-    return hasAnyContent || matchedKeys.length >= 3 ? plan : null
-}
-
-function collectJsonCandidates(body: string): Array<{ start: number; end: number; content: string }> {
-    const candidates: Array<{ start: number; end: number; content: string }> = []
-    const seen = new Set<string>()
-    const source = String(body || '')
-    const pushCandidate = (start: number, end: number, content: string) => {
-        if (start < 0 || end <= start) return
-        const normalized = content.trim()
-        if (!normalized) return
-        const key = `${start}:${end}:${normalized.length}`
-        if (seen.has(key)) return
-        seen.add(key)
-        candidates.push({ start, end, content: normalized })
-    }
-
-    const trimmed = source.trim()
-    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
-        const start = source.indexOf(trimmed)
-        pushCandidate(start, start + trimmed.length, trimmed)
-    }
-
-    const fenceRegex = /```(?:json)?\s*([\s\S]*?)```/gi
-    let fenceMatch: RegExpExecArray | null = fenceRegex.exec(source)
-    while (fenceMatch) {
-        pushCandidate(fenceMatch.index, fenceRegex.lastIndex, String(fenceMatch[1] || ''))
-        fenceMatch = fenceRegex.exec(source)
-    }
-
-    const firstBrace = source.indexOf('{')
-    const lastBrace = source.lastIndexOf('}')
-    if (firstBrace !== -1 && lastBrace > firstBrace) {
-        pushCandidate(firstBrace, lastBrace + 1, source.slice(firstBrace, lastBrace + 1))
-    }
-
-    return candidates
-}
-
 function stripDuplicateChapterHeading(text: string, chapterNumber: number, chapterTitle: string): string {
     const source = String(text || '').trim()
     if (!source) return ''
@@ -195,57 +92,6 @@ function stripDuplicateChapterHeading(text: string, chapterNumber: number, chapt
     return source
 }
 
-function parseSectionBody(body: string, chapterNumber: number, chapterTitle: string): ParsedSectionBody {
-    const source = String(body || '')
-    if (!source.trim()) return { narrative: '', plan: null }
-
-    const candidates = collectJsonCandidates(source)
-    for (const candidate of candidates) {
-        try {
-            const parsed = JSON.parse(candidate.content)
-            const plan = normalizePlanDraft(parsed)
-            if (!plan) continue
-            const before = source.slice(0, candidate.start).trim()
-            const after = source.slice(candidate.end).trim()
-            const narrative = [before, after].filter(Boolean).join('\n\n')
-            return {
-                narrative: stripDuplicateChapterHeading(narrative, chapterNumber, chapterTitle),
-                plan,
-            }
-        } catch {
-            // Ignore invalid JSON candidate and continue.
-        }
-    }
-
-    return {
-        narrative: stripDuplicateChapterHeading(source, chapterNumber, chapterTitle),
-        plan: null,
-    }
-}
-
-function formatPlanDraftAsMarkdown(plan: ChapterPlanDraft): string {
-    const blocks: string[] = ['## 章节计划草稿']
-    if (plan.beats.length > 0) {
-        blocks.push('### 节拍', plan.beats.map((item, idx) => `${idx + 1}. ${item}`).join('\n'))
-    }
-    if (plan.conflicts.length > 0) {
-        blocks.push('### 冲突', plan.conflicts.map((item) => `- ${item}`).join('\n'))
-    }
-    if (plan.foreshadowing.length > 0) {
-        blocks.push('### 伏笔', plan.foreshadowing.map((item) => `- ${item}`).join('\n'))
-    }
-    if (plan.callbackTargets.length > 0) {
-        blocks.push('### 回收目标', plan.callbackTargets.map((item) => `- ${item}`).join('\n'))
-    }
-    if (plan.roleGoals.length > 0) {
-        blocks.push('### 角色目标', plan.roleGoals.map((item) => `- **${item.role}**：${item.goal}`).join('\n'))
-    }
-    if (blocks.length === 1) {
-        blocks.push('> 暂无可展示的结构化内容。')
-    }
-    return blocks.join('\n\n')
-}
-
 function dedupeStringItems(items: string[]) {
     const seen = new Map<string, number>()
     return items.map((item) => {
@@ -255,111 +101,19 @@ function dedupeStringItems(items: string[]) {
     })
 }
 
-function dedupeRoleGoals(items: Array<{ role: string; goal: string }>) {
-    const seen = new Map<string, number>()
-    return items.map((item) => {
-        const baseKey = `${item.role}-${item.goal}`
-        const occurrence = seen.get(baseKey) ?? 0
-        seen.set(baseKey, occurrence + 1)
-        return { key: `${baseKey}-${occurrence}`, value: item }
-    })
-}
-
-function composeSectionBodies(
-    narrativeBody: string,
-    planDraft: ChapterPlanDraft | null,
+function composeSectionBody(
+    body: string,
+    chapterNumber: number,
+    chapterTitle: string,
     waiting: boolean,
-): { displayBody: string; exportBody: string } {
-    const parts: string[] = []
-    const normalizedNarrative = narrativeBody.trim()
-    if (normalizedNarrative) parts.push(normalizedNarrative)
-    if (planDraft) parts.push(formatPlanDraftAsMarkdown(planDraft))
-    const exportBody = parts.join('\n\n').trim()
+): { narrativeBody: string; displayBody: string; exportBody: string } {
+    const narrative = stripDuplicateChapterHeading(body, chapterNumber, chapterTitle)
+    const exportBody = narrative.trim()
     return {
+        narrativeBody: narrative,
         exportBody,
         displayBody: exportBody || (waiting ? '> 正在生成这一章，请稍候...' : ''),
     }
-}
-
-function PlanDraftBlock({ plan }: { plan: ChapterPlanDraft }) {
-    const hasAnyContent =
-        plan.beats.length > 0
-        || plan.conflicts.length > 0
-        || plan.foreshadowing.length > 0
-        || plan.callbackTargets.length > 0
-        || plan.roleGoals.length > 0
-
-    if (!hasAnyContent) return null
-
-    return (
-        <section className="stream-plan" aria-label="章节计划草稿">
-            <div className="stream-plan__head">
-                <p className="stream-plan__title">章节计划草稿</p>
-                <span className="stream-plan__badge">结构化</span>
-            </div>
-
-            <div className="stream-plan__grid">
-                <article className="stream-plan__card">
-                    <p className="stream-plan__card-title">节拍</p>
-                    {plan.beats.length > 0 ? (
-                        <ol className="stream-plan__list stream-plan__list--ordered">
-                            {dedupeStringItems(plan.beats).map(({ key, value }) => <li key={key}>{value}</li>)}
-                        </ol>
-                    ) : (
-                        <p className="stream-plan__empty">暂无节拍。</p>
-                    )}
-                </article>
-
-                <article className="stream-plan__card">
-                    <p className="stream-plan__card-title">冲突</p>
-                    {plan.conflicts.length > 0 ? (
-                        <ul className="stream-plan__list">
-                            {dedupeStringItems(plan.conflicts).map(({ key, value }) => <li key={key}>{value}</li>)}
-                        </ul>
-                    ) : (
-                        <p className="stream-plan__empty">暂无冲突。</p>
-                    )}
-                </article>
-
-                <article className="stream-plan__card">
-                    <p className="stream-plan__card-title">伏笔</p>
-                    {plan.foreshadowing.length > 0 ? (
-                        <ul className="stream-plan__list">
-                            {dedupeStringItems(plan.foreshadowing).map(({ key, value }) => <li key={key}>{value}</li>)}
-                        </ul>
-                    ) : (
-                        <p className="stream-plan__empty">暂无伏笔。</p>
-                    )}
-                </article>
-
-                <article className="stream-plan__card">
-                    <p className="stream-plan__card-title">回收目标</p>
-                    {plan.callbackTargets.length > 0 ? (
-                        <ul className="stream-plan__list">
-                            {dedupeStringItems(plan.callbackTargets).map(({ key, value }) => <li key={key}>{value}</li>)}
-                        </ul>
-                    ) : (
-                        <p className="stream-plan__empty">暂无回收目标。</p>
-                    )}
-                </article>
-            </div>
-
-            <article className="stream-plan__card">
-                <p className="stream-plan__card-title">角色目标</p>
-                {plan.roleGoals.length > 0 ? (
-                    <ul className="stream-plan__list">
-                        {dedupeRoleGoals(plan.roleGoals).map(({ key, value }) => (
-                            <li key={key}>
-                                <strong>{value.role}</strong>：{value.goal}
-                            </li>
-                        ))}
-                    </ul>
-                ) : (
-                    <p className="stream-plan__empty">暂无角色目标。</p>
-                )}
-            </article>
-        </section>
-    )
 }
 
 /* ── 脉冲加载指示器 ── */
@@ -549,15 +303,13 @@ export default function WritingConsolePage() {
         window.scrollTo({ top: 0, behavior: 'smooth' })
     }, [sections.length])
 
-    const sectionViewModels = useMemo<SectionViewModel[]>(
+    const sectionViewModels = useMemo(
         () =>
             sections.map((section) => {
-                const parsed = parseSectionBody(section.body, section.chapterNumber, section.title)
-                const bodies = composeSectionBodies(parsed.narrative, parsed.plan, section.waiting)
+                const bodies = composeSectionBody(section.body, section.chapterNumber, section.title, section.waiting)
                 return {
                     ...section,
-                    narrativeBody: parsed.narrative,
-                    planDraft: parsed.plan,
+                    narrativeBody: bodies.narrativeBody,
                     displayBody: bodies.displayBody,
                     exportBody: bodies.exportBody,
                 }
@@ -910,8 +662,7 @@ export default function WritingConsolePage() {
                                         {section.narrativeBody && (
                                             <ReactMarkdown>{section.narrativeBody}</ReactMarkdown>
                                         )}
-                                        {section.planDraft && <PlanDraftBlock plan={section.planDraft} />}
-                                        {!section.narrativeBody && !section.planDraft && (
+                                        {!section.narrativeBody && (
                                             <p className="placeholder-text">正在生成这一章，请稍候...</p>
                                         )}
                                         {idx < sectionViewModels.length - 1 && <hr />}

@@ -232,7 +232,7 @@ describe('WritingConsolePage', () => {
         expect(screen.getByText('这是正文内容')).toBeTruthy()
     })
 
-    it('计划 JSON 会结构化展示而不是原样输出', () => {
+    it('纯 JSON 正文不再做计划草稿解析', () => {
         mockStreamStore.sections = [
             {
                 chapterId: 'ch-1',
@@ -249,12 +249,8 @@ describe('WritingConsolePage', () => {
             },
         ]
         renderPage()
-        expect(screen.getByText('章节计划草稿')).toBeTruthy()
-        expect(screen.getByText('主角潜入镜城')).toBeTruthy()
-        expect(
-            screen.getAllByText((_, node) => node?.textContent?.trim() === '林深：带陈默活着离开').length,
-        ).toBeGreaterThan(0)
-        expect(screen.queryByText(/"beats":/)).toBeNull()
+        // Plan draft block no longer rendered — raw JSON treated as narrative
+        expect(screen.queryByText('章节计划草稿')).toBeNull()
     })
 
     it('无内容时显示占位提示', () => {
