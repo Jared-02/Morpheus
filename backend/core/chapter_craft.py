@@ -469,6 +469,116 @@ def strip_leading_chapter_heading(text: str) -> str:
     return "\n".join(lines).strip()
 
 
+_GENERATION_STATE_KEYS = frozenset(
+    {
+        "status",
+        "location",
+        "condition",
+        "ability",
+        "mood",
+        "位置",
+        "状态",
+        "伤势",
+        "能力",
+    }
+)
+
+
+def _build_generation_beats_text(beats: List[str]) -> str:
+    return "\n".join(str(beat or "").strip() for beat in beats if str(beat or "").strip())
+
+
+def _matches_generation_beats(beats_text: str, *values: object) -> bool:
+    if not beats_text:
+        return True
+    for value in values:
+        candidate = str(value or "").strip()
+        if candidate and candidate in beats_text:
+            return True
+    return False
+
+
+def _truncate_generation_text(value: object, max_len: int) -> str:
+    text = str(value or "").strip()
+    if len(text) <= max_len:
+        return text
+    return text[:max_len].rstrip()
+
+
+def build_generation_memory_window(
+    *,
+    entities: List["EntityState"],
+    events: List["EventEdge"],
+    chapter_number: int,
+    beats: List[str],
+    window: int = 3,
+) -> Dict[str, List[Dict[str, Any]]]:
+    beats_text = _build_generation_beats_text(beats)
+
+    active_entities = [
+        entity
+        for entity in entities
+        if entity.last_seen_chapter >= chapter_number - window or entity.constraints
+    ]
+    if beats_text:
+        active_entities = [
+            entity
+            for entity in active_entities
+            if _matches_generation_beats(
+                beats_text,
+                entity.name,
+                *entity.attrs.values(),
+                *entity.constraints,
+            )
+        ]
+
+    recent_events = [
+        event for event in events if chapter_number - window <= event.chapter <= chapter_number
+    ]
+    if beats_text:
+        recent_events = [
+            event
+            for event in recent_events
+            if _matches_generation_beats(
+                beats_text,
+                event.subject,
+                event.relation,
+                event.object,
+                event.description,
+            )
+        ]
+
+    return {
+        "entities": [
+            {
+                "name": entity.name,
+                "type": entity.entity_type,
+                "attrs": {
+                    key: _truncate_generation_text(value, 40)
+                    for key, value in entity.attrs.items()
+                    if key in _GENERATION_STATE_KEYS and str(value or "").strip()
+                },
+                "constraints": [
+                    _truncate_generation_text(item, 60)
+                    for item in entity.constraints
+                    if str(item or "").strip()
+                ][:3],
+            }
+            for entity in active_entities[:5]
+        ],
+        "events": [
+            {
+                "subject": _truncate_generation_text(event.subject, 40),
+                "relation": _truncate_generation_text(event.relation, 40),
+                "object": _truncate_generation_text(event.object, 40) or None,
+                "chapter": event.chapter,
+                "description": _truncate_generation_text(event.description, 80),
+            }
+            for event in recent_events[-6:]
+        ],
+    }
+
+
 def build_locked_facts(
     *,
     entities: List["EntityState"],
@@ -500,9 +610,7 @@ def build_locked_facts(
                 f"【角色已死亡】{entity.name}（第{entity.last_seen_chapter}章），不得复活或出场"
             )
         elif status in _UNAVAILABLE_STATUSES:
-            facts.append(
-                f"【角色不可用】{entity.name} 当前状态「{status}」，不得正常出场"
-            )
+            facts.append(f"【角色不可用】{entity.name} 当前状态「{status}」，不得正常出场")
         for constraint in entity.constraints:
             if constraint.strip():
                 facts.append(f"【{entity.name}·约束】{constraint}")
@@ -514,11 +622,7 @@ def build_locked_facts(
                 facts.append(f"【不可逆事件·第{event.chapter}章】{desc}")
 
     for conflict in conflicts:
-        if (
-            conflict.severity.value == "P0"
-            and not conflict.resolved
-            and not conflict.exempted
-        ):
+        if conflict.severity.value == "P0" and not conflict.resolved and not conflict.exempted:
             facts.append(f"【P0约束】{conflict.reason}")
 
     return facts
@@ -539,54 +643,35 @@ def build_setter_constraints(
     """
     constraints: List[str] = []
 
-    _STATE_KEYS = frozenset({
-        "status", "location", "condition", "ability", "mood",
-        "位置", "状态", "伤势", "能力",
-    })
-    beats_text = "\n".join(
-        str(beat or "").strip() for beat in beats if str(beat or "").strip()
-    )
-
-    def _matches_beats(*values: object) -> bool:
-        if not beats_text:
-            return True
-        for value in values:
-            candidate = str(value or "").strip()
-            if candidate and candidate in beats_text:
-                return True
-        return False
+    beats_text = _build_generation_beats_text(beats)
 
     active_entities = [
-        e for e in entities
-        if e.last_seen_chapter >= chapter_number - window or e.constraints
+        e for e in entities if e.last_seen_chapter >= chapter_number - window or e.constraints
     ]
     if beats_text:
         active_entities = [
             entity
             for entity in active_entities
-            if _matches_beats(entity.name, *entity.attrs.values(), *entity.constraints)
+            if _matches_generation_beats(
+                beats_text, entity.name, *entity.attrs.values(), *entity.constraints
+            )
         ]
     active_entities = active_entities[:5]
 
     for entity in active_entities:
         state_parts = [
-            f"{k}={v}" for k, v in entity.attrs.items()
-            if k in _STATE_KEYS and v
+            f"{k}={v}" for k, v in entity.attrs.items() if k in _GENERATION_STATE_KEYS and v
         ]
         if state_parts:
-            constraints.append(
-                f"【{entity.name}·当前状态】{'，'.join(state_parts)}"
-            )
+            constraints.append(f"【{entity.name}·当前状态】{'，'.join(state_parts)}")
 
-    recent_events = [
-        e for e in events
-        if chapter_number - window <= e.chapter < chapter_number
-    ]
+    recent_events = [e for e in events if chapter_number - window <= e.chapter < chapter_number]
     if beats_text:
         recent_events = [
             event
             for event in recent_events
-            if _matches_beats(
+            if _matches_generation_beats(
+                beats_text,
                 event.subject,
                 event.relation,
                 event.object,

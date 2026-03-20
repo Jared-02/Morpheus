@@ -590,6 +590,10 @@ class StudioWorkflow:
             draft_context["locked_facts"] = context["locked_facts"]
         if context.get("setter_constraints"):
             draft_context["setter_constraints"] = context["setter_constraints"]
+        if context.get("entities"):
+            draft_context["entities"] = context["entities"]
+        if context.get("events"):
+            draft_context["events"] = context["events"]
         if chapter.chapter_number > 1 and context.get("previous_chapter_synopsis"):
             draft_context["continuity_handoff"] = (
                 "【承接指令】本章开篇必须自然承接上一章最后的场景/动作/对白，"
@@ -773,6 +777,10 @@ class StudioWorkflow:
             draft_context["locked_facts"] = context["locked_facts"]
         if context.get("setter_constraints"):
             draft_context["setter_constraints"] = context["setter_constraints"]
+        if context.get("entities"):
+            draft_context["entities"] = context["entities"]
+        if context.get("events"):
+            draft_context["events"] = context["events"]
         if chapter.chapter_number > 1 and context.get("previous_chapter_synopsis"):
             draft_context["continuity_handoff"] = (
                 "【承接指令】本章开篇必须自然承接上一章最后的场景/动作/对白，"
@@ -1484,8 +1492,7 @@ class StudioWorkflow:
         plan_conflicts = plan.conflicts or []
         if plan_conflicts:
             conflict_hit = sum(
-                1 for c in plan_conflicts
-                if any(kw in text for kw in c[:8].split() if len(kw) >= 2)
+                1 for c in plan_conflicts if any(kw in text for kw in c[:8].split() if len(kw) >= 2)
             )
             conflict_score = int(20 * min(conflict_hit / len(plan_conflicts), 1.0))
         else:
@@ -1493,9 +1500,13 @@ class StudioWorkflow:
 
         # 4. Anti-pattern check (0-20)
         anti_patterns = [
-            "\u5fc3\u4e2d\u6697\u9053", "\u5fc3\u4e0b\u4e00\u6c89",
-            "\u4e0d\u7531\u5f97", "\u5fcd\u4e0d\u4f4f",
-            "\u53ea\u89c1", "\u4f46\u89c1", "\u5374\u89c1",
+            "\u5fc3\u4e2d\u6697\u9053",
+            "\u5fc3\u4e0b\u4e00\u6c89",
+            "\u4e0d\u7531\u5f97",
+            "\u5fcd\u4e0d\u4f4f",
+            "\u53ea\u89c1",
+            "\u4f46\u89c1",
+            "\u5374\u89c1",
         ]
         pattern_hits = sum(1 for p in anti_patterns if p in text)
         anti_pattern_score = max(0, 20 - pattern_hits * 4)

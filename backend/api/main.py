@@ -27,6 +27,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from agents.studio import AGENT_PROMPTS, AgentStudio, StudioWorkflow
 from core.chapter_craft import (
+    build_generation_memory_window,
     build_locked_facts,
     build_micro_arc_hint,
     build_outline_phase_hints,
@@ -1906,6 +1907,10 @@ def build_one_shot_messages(
         user_payload["locked_facts"] = generation_constraints["locked_facts"]
     if generation_constraints.get("setter_constraints"):
         user_payload["setter_constraints"] = generation_constraints["setter_constraints"]
+    if generation_constraints.get("entities"):
+        user_payload["entities"] = generation_constraints["entities"]
+    if generation_constraints.get("events"):
+        user_payload["events"] = generation_constraints["events"]
 
     return [
         {
@@ -2207,11 +2212,19 @@ def compact_previous_chapters(previous: List[str], max_total_chars: int) -> List
 
 
 def _build_generation_constraints(
-    store: MemoryStore, chapter: "Chapter",
-) -> Dict[str, List[str]]:
-    """Build locked_facts and setter_constraints for draft generation context."""
+    store: MemoryStore,
+    chapter: "Chapter",
+) -> Dict[str, Any]:
+    """Build bounded generation context for draft generation."""
     entities = store.get_all_entities() if settings.graph_feature_enabled else []
     events = store.get_all_events() if settings.graph_feature_enabled else []
+    beats = chapter.plan.beats if chapter.plan else []
+    structured_window = build_generation_memory_window(
+        entities=entities,
+        events=events,
+        chapter_number=chapter.chapter_number,
+        beats=beats,
+    )
     return {
         "locked_facts": build_locked_facts(
             entities=entities,
@@ -2223,8 +2236,10 @@ def _build_generation_constraints(
             entities=entities,
             events=events,
             chapter_number=chapter.chapter_number,
-            beats=chapter.plan.beats if chapter.plan else [],
+            beats=beats,
         ),
+        "entities": structured_window["entities"],
+        "events": structured_window["events"],
     }
 
 
@@ -3158,24 +3173,32 @@ def _raise_if_fanqie_login_required(
 
 
 def _resolve_fanqie_create_automation_dir() -> Path:
-    return Path(
-        os.getenv(
-            "FANQIE_CREATE_BOOK_AUTOMATION_DIR",
+    return (
+        Path(
             os.getenv(
-                "FANQIE_AUTOMATION_DIR",
-                str(BACKEND_ROOT.parent / "automation" / "fanqie-create-book-atomic"),
-            ),
+                "FANQIE_CREATE_BOOK_AUTOMATION_DIR",
+                os.getenv(
+                    "FANQIE_AUTOMATION_DIR",
+                    str(BACKEND_ROOT.parent / "automation" / "fanqie-create-book-atomic"),
+                ),
+            )
         )
-    ).expanduser().resolve()
+        .expanduser()
+        .resolve()
+    )
 
 
 def _resolve_fanqie_publish_automation_dir() -> Path:
-    return Path(
-        os.getenv(
-            "FANQIE_AUTOMATION_DIR",
-            str(BACKEND_ROOT.parent / "automation" / "fanqie-playwright"),
+    return (
+        Path(
+            os.getenv(
+                "FANQIE_AUTOMATION_DIR",
+                str(BACKEND_ROOT.parent / "automation" / "fanqie-playwright"),
+            )
         )
-    ).expanduser().resolve()
+        .expanduser()
+        .resolve()
+    )
 
 
 def _derive_fanqie_role_candidates(project_id: str) -> List[str]:
@@ -3236,7 +3259,9 @@ def _normalize_identity_lines(lines: List[str]) -> List[str]:
     return normalized
 
 
-def _parse_identity_document(content: str) -> tuple[str, List[str], Dict[str, List[str]], List[str]]:
+def _parse_identity_document(
+    content: str,
+) -> tuple[str, List[str], Dict[str, List[str]], List[str]]:
     lines = (content or "").splitlines()
     title = lines[0].strip() if lines else "# IDENTITY"
     preamble: List[str] = []
@@ -3307,11 +3332,11 @@ def _merge_project_identity(
     previous_project: Optional[Project] = None,
 ) -> str:
     generated_identity = _build_project_identity(project)
-    generated_title, _generated_preamble, generated_sections, _generated_order = _parse_identity_document(
-        generated_identity
+    generated_title, _generated_preamble, generated_sections, _generated_order = (
+        _parse_identity_document(generated_identity)
     )
-    _existing_title, existing_preamble, existing_sections, existing_order = _parse_identity_document(
-        existing_identity
+    _existing_title, existing_preamble, existing_sections, existing_order = (
+        _parse_identity_document(existing_identity)
     )
 
     previous_generated_sections: Dict[str, List[str]] = {}
@@ -3431,9 +3456,7 @@ async def _detect_book_id_via_playwright(automation_dir: Path, timeout_sec: int 
         env=env,
     )
     try:
-        stdout_bytes, stderr_bytes = await asyncio.wait_for(
-            proc.communicate(), timeout=timeout_sec
-        )
+        stdout_bytes, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=timeout_sec)
     except asyncio.TimeoutError:
         proc.kill()
         await proc.wait()
@@ -4143,11 +4166,20 @@ async def update_project(project_id: str, req: UpdateProjectRequest):
         elif key == "fanqie_book_id":
             normalized_updates[key] = _normalize_fanqie_book_id(value)
         elif key == "taboo_constraints":
-            normalized_updates[key] = _merge_taboo_constraints_with_template(value, project.template_id)
+            normalized_updates[key] = _merge_taboo_constraints_with_template(
+                value, project.template_id
+            )
         else:
             normalized_updates[key] = value
 
-    derived_identity_fields = {"name", "genre", "style", "synopsis", "taboo_constraints", "template_id"}
+    derived_identity_fields = {
+        "name",
+        "genre",
+        "style",
+        "synopsis",
+        "taboo_constraints",
+        "template_id",
+    }
     changed = False
     should_sync_identity = False
     previous_project = project.model_copy(deep=True)
@@ -4205,9 +4237,7 @@ async def list_chapters(project_id: str):
             "status": chapter.status.value,
             "word_count": chapter.word_count,
             "conflict_count": len(chapter.conflicts),
-            "has_persisted_content": bool(
-                str(chapter.final or chapter.draft or "").strip()
-            ),
+            "has_persisted_content": bool(str(chapter.final or chapter.draft or "").strip()),
             "updated_at": chapter.updated_at.isoformat(),
         }
         for chapter in chapter_list(project_id)
@@ -6109,7 +6139,9 @@ async def review_chapter(req: ReviewRequest):
                         project_id=_project_id,
                     )
                 except Exception:
-                    logger.warning("L4 trigger failed chapter_no=%d", _chapter_number, exc_info=True)
+                    logger.warning(
+                        "L4 trigger failed chapter_no=%d", _chapter_number, exc_info=True
+                    )
 
             asyncio.create_task(_bg_memory_refresh())
             asyncio.create_task(_bg_l4_extraction())

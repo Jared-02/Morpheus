@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import patch
 
 from agents.studio import StudioWorkflow
+from core import chapter_craft
 from core.chapter_craft import build_locked_facts, build_setter_constraints
 from models import AgentRole, Chapter, ChapterPlan, EntityState, EventEdge
 
@@ -199,11 +200,20 @@ class StudioPlanParserTest(unittest.TestCase):
                             "identity": "# IDENTITY",
                             "project_style": "冷峻",
                             "target_words": 3000,
+                            "entities": [{"name": "陈砚", "type": "character"}],
+                            "events": [
+                                {"subject": "陈砚", "relation": "encountered", "chapter": 1}
+                            ],
                         },
                     )
                 )
 
         self.assertEqual(captured.get("target_words"), 3000)
+        self.assertEqual(captured.get("entities"), [{"name": "陈砚", "type": "character"}])
+        self.assertEqual(
+            captured.get("events"),
+            [{"subject": "陈砚", "relation": "encountered", "chapter": 1}],
+        )
 
     def test_generate_draft_quality_retry_failure_falls_back_to_first_draft(self):
         chapter = self._chapter()
@@ -386,6 +396,82 @@ class StudioPlanParserTest(unittest.TestCase):
 
         state_lines = [item for item in constraints if "当前状态" in item]
         self.assertLessEqual(len(state_lines), 5)
+
+    def test_build_generation_memory_window_returns_bounded_entities_and_events(self):
+        entities = [
+            EntityState(
+                entity_id="e-1",
+                entity_type="character",
+                name="陈砚",
+                attrs={
+                    "status": "负伤",
+                    "location": "旧镜城",
+                    "mood": "警戒",
+                    "ability": "镜折潜行",
+                    "extra": "应被裁剪",
+                },
+                constraints=["不能暴露身份", "不能丢失密钥", "避免正面交战", "额外约束应被裁剪"],
+                first_seen_chapter=1,
+                last_seen_chapter=6,
+            ),
+            EntityState(
+                entity_id="e-2",
+                entity_type="organization",
+                name="旧镜城守卫",
+                attrs={"status": "搜捕", "location": "钟楼区"},
+                constraints=[],
+                first_seen_chapter=2,
+                last_seen_chapter=5,
+            ),
+            EntityState(
+                entity_id="e-3",
+                entity_type="character",
+                name="无关角色",
+                attrs={"status": "待命", "location": "南港"},
+                constraints=[],
+                first_seen_chapter=1,
+                last_seen_chapter=2,
+            ),
+        ]
+        events = [
+            EventEdge(
+                event_id="ev-1",
+                subject="陈砚",
+                relation="encountered",
+                object="旧镜城守卫",
+                chapter=5,
+                confidence=0.95,
+                description="在钟楼下短暂交锋并暴露伤势细节需要裁剪到合理长度",
+            ),
+            EventEdge(
+                event_id="ev-2",
+                subject="无关角色",
+                relation="rested",
+                object="南港",
+                chapter=2,
+                confidence=0.5,
+                description="与当前节拍无关",
+            ),
+        ]
+
+        window = chapter_craft.build_generation_memory_window(
+            entities=entities,
+            events=events,
+            chapter_number=6,
+            beats=["陈砚在旧镜城躲避守卫并处理伤势。"],
+        )
+
+        self.assertEqual(len(window["entities"]), 1)
+        self.assertEqual(window["entities"][0]["name"], "陈砚")
+        self.assertEqual(window["entities"][0]["type"], "character")
+        self.assertEqual(
+            set(window["entities"][0]["attrs"].keys()), {"status", "location", "mood", "ability"}
+        )
+        self.assertEqual(len(window["entities"][0]["constraints"]), 3)
+        self.assertEqual(window["events"][0]["subject"], "陈砚")
+        self.assertEqual(window["events"][0]["chapter"], 5)
+        self.assertLessEqual(len(window["events"][0]["description"]), 80)
+        self.assertTrue(all(item["subject"] != "无关角色" for item in window["events"]))
 
 
 if __name__ == "__main__":

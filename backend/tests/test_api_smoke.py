@@ -19,6 +19,7 @@ from api.main import (
     app,
     build_outline_messages,
     build_fallback_outline,
+    build_one_shot_messages,
     extract_graph_role_names,
     validate_graph_role_name,
     enforce_draft_target_words,
@@ -37,6 +38,7 @@ from api.main import (
     settings,
     upsert_graph_from_chapter,
     generate_unique_title_from_chapter_content,
+    OneShotDraftRequest,
 )
 from agents.studio import StudioWorkflow
 from core.chapter_craft import (
@@ -153,6 +155,62 @@ class NovelistApiSmokeTest(unittest.TestCase):
         self.assertNotIn("<think>", decision["decision_text"])
         self.assertIn("可见解释", decision["reasoning"])
         self.assertNotIn("thinking:", decision["reasoning"].lower())
+
+    def test_build_one_shot_messages_include_structured_entities_and_events(self):
+        project_id = self._create_project()
+        chapter_id = self._create_chapter(project_id)
+        chapter = chapters[chapter_id]
+        chapter.plan = ChapterPlan(
+            id=f"plan-{uuid4().hex[:8]}",
+            chapter_id=chapter.chapter_number,
+            title=chapter.title,
+            goal=chapter.goal,
+            beats=["陈砚在旧镜城躲避守卫并处理伤势。"],
+            conflicts=[],
+        )
+        store = get_or_create_store(project_id)
+        store.add_entity(
+            EntityState(
+                entity_id=f"entity-{uuid4().hex[:8]}",
+                entity_type="character",
+                name="陈砚",
+                attrs={"status": "负伤", "location": "旧镜城", "mood": "警戒", "extra": "忽略"},
+                constraints=["不能暴露身份", "不能丢失密钥", "避免正面交战", "额外约束应被裁剪"],
+                first_seen_chapter=1,
+                last_seen_chapter=1,
+            )
+        )
+        store.add_event(
+            EventEdge(
+                event_id=f"event-{uuid4().hex[:8]}",
+                subject="陈砚",
+                relation="encountered",
+                object="守卫",
+                chapter=1,
+                confidence=0.95,
+                description="钟楼交锋后带伤撤离并继续躲避追踪，描述需要被裁剪到合理长度。",
+            )
+        )
+
+        messages = build_one_shot_messages(
+            req=OneShotDraftRequest(prompt="继续写", target_words=1600, mode="quick"),
+            chapter=chapter,
+            project=projects[project_id],
+            store=store,
+            premise="继续写",
+            previous_chapters=[],
+        )
+
+        payload = json.loads(messages[1]["content"])
+        self.assertEqual(payload["entities"][0]["name"], "陈砚")
+        self.assertEqual(payload["entities"][0]["type"], "character")
+        self.assertEqual(
+            set(payload["entities"][0]["attrs"].keys()), {"status", "location", "mood"}
+        )
+        self.assertEqual(len(payload["entities"][0]["constraints"]), 3)
+        self.assertEqual(payload["events"][0]["subject"], "陈砚")
+        self.assertEqual(payload["events"][0]["object"], "守卫")
+        self.assertLessEqual(len(payload["events"][0]["description"]), 80)
 
     def test_graph_endpoints_sanitize_placeholder_role_names(self):
         project_id = self._create_project()
@@ -736,7 +794,9 @@ class NovelistApiSmokeTest(unittest.TestCase):
             json={"chapter_id": chapter_id, "action": "approve"},
         )
         self.assertEqual(approve_res.status_code, 400)
-        self.assertEqual(approve_res.json().get("detail"), "P0 conflicts must be resolved before approval")
+        self.assertEqual(
+            approve_res.json().get("detail"), "P0 conflicts must be resolved before approval"
+        )
 
     def test_consistency_p0_conflict_blocks_approval(self):
         project_id = self._create_project(taboo_constraints=["禁词触发器"])
