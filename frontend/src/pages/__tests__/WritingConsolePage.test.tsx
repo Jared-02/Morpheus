@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import WritingConsolePage from '../WritingConsolePage'
 
 /* ── localStorage mock ── */
@@ -104,11 +104,26 @@ vi.mock('../../stores/useUIStore', () => ({
 
 /* ── Helpers ── */
 
+function LocationProbe() {
+    const location = useLocation()
+    return <div data-testid="location-search">{location.search}</div>
+}
+
+function RouteJumpProbe() {
+    const navigate = useNavigate()
+    return (
+        <>
+            <button type="button" onClick={() => navigate('/project/proj-2/write?entry=first-chapter')}>跳到项目2</button>
+            <button type="button" onClick={() => navigate('/project/proj-2/write?direction=%E6%96%B0%E9%A1%B9%E7%9B%AE%E6%96%B9%E5%90%91')}>跳到项目2并带方向</button>
+        </>
+    )
+}
+
 function renderPage(initialPath = '/project/proj-1/write') {
     return render(
         <MemoryRouter initialEntries={[initialPath]}>
             <Routes>
-                <Route path="/project/:projectId/write" element={<WritingConsolePage />} />
+                <Route path="/project/:projectId/write" element={<><WritingConsolePage /><LocationProbe /><RouteJumpProbe /></>} />
             </Routes>
         </MemoryRouter>,
     )
@@ -276,6 +291,76 @@ describe('WritingConsolePage', () => {
         })
         expect(screen.queryByText('开始你的第一章')).toBeNull()
         expect(screen.getByText(/输入创作提示并点击/)).toBeTruthy()
+    })
+
+    it('entry=first-chapter 检查失败时保留入口参数以便重试', async () => {
+        mockApiGet.mockRejectedValueOnce(new Error('network down'))
+        renderPage('/project/proj-1/write?entry=first-chapter')
+
+        await waitFor(() => {
+            expect(mockApiGet).toHaveBeenCalledWith('/projects/proj-1/chapters')
+        })
+
+        expect(screen.queryByText('开始你的第一章')).toBeNull()
+        expect(screen.getByTestId('location-search').textContent).toContain('entry=first-chapter')
+    })
+
+    it('切换到新项目时会重新执行首章引导检查', async () => {
+        mockApiGet
+            .mockResolvedValueOnce({ data: [] })
+            .mockResolvedValueOnce({ data: [] })
+        renderPage('/project/proj-1/write?entry=first-chapter')
+
+        await waitFor(() => {
+            expect(screen.getByText('开始你的第一章')).toBeTruthy()
+        })
+
+        mockProjectStore.currentProject = {
+            ...mockProjectStore.currentProject,
+            id: 'proj-2',
+            name: '测试项目二',
+        }
+        fireEvent.click(screen.getByText('跳到项目2'))
+
+        await waitFor(() => {
+            expect(mockApiGet).toHaveBeenCalledWith('/projects/proj-2/chapters')
+        })
+    })
+
+    it('切换到新项目时会清空上一个项目的流式内容', async () => {
+        mockStreamStore.sections = [
+            { chapterId: 'old-1', chapterNumber: 1, title: '旧项目章节', body: '旧项目正文', waiting: false },
+        ]
+        renderPage('/project/proj-1/write')
+        expect(screen.getByText('旧项目正文')).toBeTruthy()
+
+        mockProjectStore.currentProject = {
+            ...mockProjectStore.currentProject,
+            id: 'proj-2',
+            name: '测试项目二',
+        }
+        fireEvent.click(screen.getByText('跳到项目2'))
+
+        await waitFor(() => {
+            expect(mockStreamStore.clearStream).toHaveBeenCalledTimes(1)
+        })
+    })
+
+    it('切换到新项目并带 direction 时会重新预填创作方向', async () => {
+        renderPage('/project/proj-1/write?direction=%E6%97%A7%E9%A1%B9%E7%9B%AE%E6%96%B9%E5%90%91')
+        const textarea = screen.getByPlaceholderText(/对这批章节的创作方向/) as HTMLTextAreaElement
+        expect(textarea.value).toBe('旧项目方向')
+
+        mockProjectStore.currentProject = {
+            ...mockProjectStore.currentProject,
+            id: 'proj-2',
+            name: '测试项目二',
+        }
+        fireEvent.click(screen.getByText('跳到项目2并带方向'))
+
+        await waitFor(() => {
+            expect((screen.getByPlaceholderText(/对这批章节的创作方向/) as HTMLTextAreaElement).value).toBe('新项目方向')
+        })
     })
 
     it('有 chapters 时显示统计信息', () => {
@@ -620,6 +705,28 @@ describe('WritingConsolePage', () => {
         fireEvent.blur(input)
         expect(localStorageMock.setItem).toHaveBeenCalled()
         expect(mockAddToast).not.toHaveBeenCalledWith('info', '高级设置已保存')
+    })
+
+    it('流式生成报错时展示引导式错误信息', () => {
+        renderPage()
+        fireEvent.change(screen.getByPlaceholderText(/对这批章节的创作方向/), {
+            target: { value: '测试错误引导' },
+        })
+        fireEvent.click(screen.getByText('开始生成'))
+        expect(mockStart).toHaveBeenCalledTimes(1)
+
+        mockAddToast.mockClear()
+        const payload = mockStart.mock.calls[0][0]
+        payload.onError('ETIMEDOUT')
+
+        expect(mockAddToast).toHaveBeenCalledWith(
+            'error',
+            '流式生成中断',
+            expect.objectContaining({
+                context: '流式生成',
+                detail: '生成任务耗时较长，请稍后重试或减少章节数量。',
+            }),
+        )
     })
 
     it('流式生成报错后的重新开始动作会拦截非法高级设置', () => {

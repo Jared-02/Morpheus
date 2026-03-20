@@ -1,5 +1,6 @@
 import { useCallback, useRef } from 'react'
 import { useStreamStore, type StreamChapter, type StreamSection, type GenerationForm, type ChapterStageEvent } from '../stores/useStreamStore'
+import { useProjectStore } from '../stores/useProjectStore'
 
 export interface UseSSEStreamOptions {
     projectId: string
@@ -96,6 +97,8 @@ export function useSSEStream() {
         setChapterStage,
         clearStages,
     } = useStreamStore()
+    const bumpRevision = useProjectStore((s) => s.bumpRevision)
+    const isActiveSession = useProjectStore((s) => s.isActiveSession)
 
     const abortRef = useRef<AbortController | null>(null)
     const chunkBuffers = useRef<Record<string, ChunkBuffer>>({})
@@ -111,7 +114,8 @@ export function useSSEStream() {
         }
     }, [])
 
-    const flushBuffers = useCallback(() => {
+    const flushBuffers = useCallback((capturedRevision?: number) => {
+        if (capturedRevision !== undefined && !isActiveSession(capturedRevision)) return
         if (flushTimer.current !== null) {
             window.clearTimeout(flushTimer.current)
             flushTimer.current = null
@@ -136,13 +140,13 @@ export function useSSEStream() {
             }
             return next
         })
-    }, [setSections])
+    }, [isActiveSession, setSections])
 
-    const scheduleFlush = useCallback(() => {
+    const scheduleFlush = useCallback((capturedRevision: number) => {
         if (flushTimer.current !== null) return
         flushTimer.current = window.setTimeout(() => {
             flushTimer.current = null
-            flushBuffers()
+            flushBuffers(capturedRevision)
         }, 25)
     }, [flushBuffers])
 
@@ -152,8 +156,9 @@ export function useSSEStream() {
         eventName: string,
         payload: any,
         opts: UseSSEStreamOptions,
+        capturedRevision: number,
     ) => {
-        if (eventName === 'heartbeat') return
+        if (eventName === 'heartbeat' || !isActiveSession(capturedRevision)) return
 
         if (eventName === 'chapter_start') {
             const chapterId = String(payload.chapter_id || `chapter-${payload.chapter_number}`)
@@ -187,12 +192,12 @@ export function useSSEStream() {
             if (typeof payload.title === 'string' && payload.title.trim()) buf.title = payload.title
             buf.chunks.push(chunk)
             chunkBuffers.current[chapterId] = buf
-            scheduleFlush()
+            scheduleFlush(capturedRevision)
             return
         }
 
         if (eventName === 'chapter_replace') {
-            flushBuffers()
+            flushBuffers(capturedRevision)
             const chapterNumber = Number(payload.chapter_number) || 0
             const chapterId = String(payload.chapter_id || `chapter-${chapterNumber}`)
             const title = String(payload.title || `章节${chapterNumber}`)
@@ -203,7 +208,7 @@ export function useSSEStream() {
         }
 
         if (eventName === 'chapter_done') {
-            flushBuffers()
+            flushBuffers(capturedRevision)
             const ch: StreamChapter = {
                 id: payload.id,
                 chapter_number: payload.chapter_number,
@@ -244,7 +249,7 @@ export function useSSEStream() {
         }
 
         if (eventName === 'error') {
-            flushBuffers()
+            flushBuffers(capturedRevision)
             const detail = String(payload.detail || '未知错误')
             setError(detail)
             appendLog(`生成失败：${detail}`)
@@ -253,7 +258,7 @@ export function useSSEStream() {
         }
 
         if (eventName === 'done') {
-            flushBuffers()
+            flushBuffers(capturedRevision)
             appendLog(
                 `整本生成结束：共 ${payload.generated_chapters} 章，用时 ${Number(payload.elapsed_s || 0).toFixed(2)}s`,
             )
@@ -263,12 +268,14 @@ export function useSSEStream() {
 
         // Forward other events as logs
         appendLog(`事件 ${eventName}`)
-    }, [appendLog, flushBuffers, setChapters, setChapterStage, setError, setSections, scheduleFlush])
+    }, [appendLog, flushBuffers, isActiveSession, setChapters, setChapterStage, setError, setSections, scheduleFlush])
 
     /* ── public API ── */
 
     const start = useCallback(async (opts: UseSSEStreamOptions) => {
         if (generating) return
+
+        const capturedRevision = bumpRevision()
 
         // Reset state
         setGenerating(true)
@@ -300,15 +307,17 @@ export function useSSEStream() {
 
             await consumeSse(
                 res,
-                (eventName, payload) => handleEvent(eventName, payload, opts),
+                (eventName, payload) => handleEvent(eventName, payload, opts, capturedRevision),
                 controller.signal,
             )
         } catch (err: any) {
             if (controller.signal.aborted) {
-                flushBuffers()
-                appendLog('任务已手动终止')
-            } else {
-                flushBuffers()
+                if (isActiveSession(capturedRevision)) {
+                    flushBuffers(capturedRevision)
+                    appendLog('任务已手动终止')
+                }
+            } else if (isActiveSession(capturedRevision)) {
+                flushBuffers(capturedRevision)
                 const detail = err?.message || '流式任务异常'
                 setError(detail)
                 appendLog(`生成中断：${detail}`)
@@ -319,14 +328,19 @@ export function useSSEStream() {
                 window.clearTimeout(flushTimer.current)
                 flushTimer.current = null
             }
-            flushBuffers()
-            clearBuffers()
-            setGenerating(false)
-            abortRef.current = null
+            if (isActiveSession(capturedRevision)) {
+                flushBuffers(capturedRevision)
+                clearBuffers()
+                setGenerating(false)
+            }
+            if (abortRef.current === controller) {
+                abortRef.current = null
+            }
         }
-    }, [appendLog, clearBuffers, clearStages, flushBuffers, generating, handleEvent, setChapters, setError, setGenerating, setSections])
+    }, [appendLog, bumpRevision, clearBuffers, clearStages, flushBuffers, generating, handleEvent, isActiveSession, setChapters, setError, setGenerating, setSections])
 
     const stop = useCallback(() => {
+        bumpRevision()
         // 5-step stop sequence:
         // 1. Abort the fetch request
         const ctrl = abortRef.current
@@ -343,9 +357,10 @@ export function useSSEStream() {
         flushBuffers()
         // 4. Clear chunk buffers
         clearBuffers()
+        appendLog('任务已手动终止')
         // 5. Mark generation as stopped
         setGenerating(false)
-    }, [clearBuffers, flushBuffers, setGenerating])
+    }, [appendLog, bumpRevision, clearBuffers, flushBuffers, setGenerating])
 
     return { start, stop, generating }
 }

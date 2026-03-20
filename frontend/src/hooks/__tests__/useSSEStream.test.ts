@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 import { useSSEStream } from '../useSSEStream'
 import { useStreamStore } from '../../stores/useStreamStore'
+import { useProjectStore } from '../../stores/useProjectStore'
 
 /* ── helpers ── */
 
@@ -40,6 +41,7 @@ beforeEach(() => {
         logs: [],
         error: null,
     })
+    useProjectStore.setState({ sessionRevision: 0 })
     vi.restoreAllMocks()
 })
 
@@ -271,5 +273,86 @@ describe('useSSEStream', () => {
         })
         expect(payload.scope).toBeUndefined()
         expect(payload.start_chapter_number).toBeUndefined()
+    })
+
+    it('ignores stale events from an aborted stream after an immediate restart', async () => {
+        const encoder = new TextEncoder()
+        let firstController: ReadableStreamDefaultController<Uint8Array>
+        const firstResponse = {
+            ok: true,
+            status: 200,
+            body: new ReadableStream<Uint8Array>({
+                start(controller) {
+                    firstController = controller
+                },
+            }),
+        } as unknown as Response
+
+        const secondFrames = [
+            sseFrame('chapter_start', { chapter_id: 'fresh-1', chapter_number: 1, title: '新流' }),
+            sseFrame('chapter_chunk', { chapter_id: 'fresh-1', chapter_number: 1, chunk: '有效正文' }),
+            sseFrame('chapter_done', {
+                id: 'fresh-1', chapter_number: 1, title: '新流',
+                status: 'done', word_count: 4, p0_count: 0,
+            }),
+            sseFrame('done', { generated_chapters: 1, elapsed_s: 0.2 }),
+        ]
+
+        vi.spyOn(globalThis, 'fetch')
+            .mockResolvedValueOnce(firstResponse)
+            .mockResolvedValueOnce(makeSseResponse(secondFrames))
+
+        const { result } = renderHook(() => useSSEStream())
+
+        let firstStartPromise!: Promise<void>
+        act(() => {
+            firstStartPromise = result.current.start({
+                projectId: 'proj-1',
+                form: {
+                    batch_direction: '第一轮',
+                    mode: 'studio',
+                    chapter_count: 1,
+                    words_per_chapter: 1600,
+                    auto_approve: true,
+                },
+            })
+        })
+
+        await act(async () => {
+            await Promise.resolve()
+        })
+
+        act(() => {
+            result.current.stop()
+        })
+
+        await act(async () => {
+            await result.current.start({
+                projectId: 'proj-1',
+                form: {
+                    batch_direction: '第二轮',
+                    mode: 'studio',
+                    chapter_count: 1,
+                    words_per_chapter: 1600,
+                    auto_approve: true,
+                },
+            })
+        })
+
+        await act(async () => {
+            firstController.enqueue(encoder.encode(
+                sseFrame('chapter_start', { chapter_id: 'stale-1', chapter_number: 99, title: '旧流' })
+                + sseFrame('chapter_chunk', { chapter_id: 'stale-1', chapter_number: 99, chunk: '陈旧正文' })
+                + sseFrame('done', { generated_chapters: 1, elapsed_s: 9.9 }),
+            ))
+            firstController.close()
+            await firstStartPromise
+        })
+
+        const store = useStreamStore.getState()
+        expect(store.sections).toHaveLength(1)
+        expect(store.sections[0].chapterId).toBe('fresh-1')
+        expect(store.sections[0].body).toBe('有效正文')
+        expect(store.sections.find((section) => section.chapterId === 'stale-1')).toBeUndefined()
     })
 })

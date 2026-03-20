@@ -370,6 +370,7 @@ export default function ChapterWorkbenchPage() {
     const [creatingFanqieBook, setCreatingFanqieBook] = useState(false)
     const [fillingFanqieByLLM, setFillingFanqieByLLM] = useState(false)
     const [showFanqieCreateForm, setShowFanqieCreateForm] = useState(false)
+    const [fanqieBookIdInput, setFanqieBookIdInput] = useState(currentProject?.fanqie_book_id || '')
     const [fanqieCreateForm, setFanqieCreateForm] = useState<FanqieCreateFormState>({
         intro: '',
         protagonist1: '',
@@ -451,6 +452,10 @@ export default function ChapterWorkbenchPage() {
             currentSource?.close()
         }
     }, [chapterId, projectId, loadChapter, fetchChapters, fetchProject])
+
+    useEffect(() => {
+        setFanqieBookIdInput(currentProject?.fanqie_book_id || '')
+    }, [currentProject?.fanqie_book_id])
 
     useEffect(() => {
         if (chapter && chapterId && projectId) {
@@ -1326,12 +1331,18 @@ export default function ChapterWorkbenchPage() {
                                     type="text"
                                     className="input"
                                     style={{ width: 120, fontSize: '0.78rem', padding: '2px 6px' }}
-                                    defaultValue={currentProject?.fanqie_book_id || ''}
+                                    value={fanqieBookIdInput}
                                     placeholder="未绑定"
+                                    onChange={(e) => {
+                                        setFanqieBookIdInput(e.target.value)
+                                    }}
                                     onBlur={(e) => {
                                         const val = e.target.value.trim()
                                         if (val !== (currentProject?.fanqie_book_id || '')) {
+                                            setFanqieBookIdInput(val)
                                             void saveFanqieBookId(val)
+                                        } else if (e.target.value !== val) {
+                                            setFanqieBookIdInput(val)
                                         }
                                     }}
                                     onKeyDown={(e) => {

@@ -19,6 +19,7 @@ import { useActivityStore } from '../stores/useActivityStore'
 import { useUIStore } from '../stores/useUIStore'
 import { getStoryTemplateById } from '../config/storyTemplates'
 import { isFirstChapterEntry, clearFirstChapterEntry } from '../utils/firstChapterOnboarding'
+import { guideGenerationError } from '../utils/errorGuidance'
 
 /* ── SVG 图标 ── */
 
@@ -175,6 +176,8 @@ export default function WritingConsolePage() {
     const [firstChapterMode, setFirstChapterMode] = useState(false)
     const prefillAppliedRef = useRef(false)
     const firstChapterCheckedRef = useRef(false)
+    const firstChapterCheckInFlightRef = useRef(false)
+    const lastProjectIdRef = useRef<string | null>(null)
     const settingsLoadedRef = useRef<string | null>(null)
     const settingsHydratedRef = useRef(false)
     const lastSavedSettingsRef = useRef<string | null>(null)
@@ -253,6 +256,24 @@ export default function WritingConsolePage() {
         setWordsPerChapterInput(String(form.words_per_chapter))
     }, [form.words_per_chapter])
 
+    useEffect(() => {
+        if (!projectId) return
+        if (lastProjectIdRef.current === null) {
+            lastProjectIdRef.current = projectId
+            return
+        }
+        if (lastProjectIdRef.current === projectId) return
+
+        lastProjectIdRef.current = projectId
+        clearStream()
+        setForm((prev) => ({ ...prev, batch_direction: '' }))
+        setFirstChapterMode(false)
+        prefillAppliedRef.current = false
+        firstChapterCheckedRef.current = false
+        firstChapterCheckInFlightRef.current = false
+        setActiveChapterIdx(0)
+    }, [projectId, clearStream])
+
     /* ── 从项目概览接收快速启动参数 ── */
     useEffect(() => {
         if (prefillAppliedRef.current) return
@@ -283,11 +304,10 @@ export default function WritingConsolePage() {
 
     /* ── 首章引导模式检测 ── */
     useEffect(() => {
-        if (firstChapterCheckedRef.current || !projectId) return
+        if (firstChapterCheckedRef.current || firstChapterCheckInFlightRef.current || !projectId) return
         if (!isFirstChapterEntry(searchParams)) return
-        firstChapterCheckedRef.current = true
-        clearFirstChapterEntry(setSearchParams)
 
+        firstChapterCheckInFlightRef.current = true
         api.get(`/projects/${projectId}/chapters`)
             .then((res) => {
                 const list = Array.isArray(res.data) ? res.data : []
@@ -297,11 +317,18 @@ export default function WritingConsolePage() {
                     setChapterCountInput('1')
                     addToast('info', '首次创作：已为你预设生成 1 章，填写创作方向后点击「开始生成」即可。')
                 }
+                firstChapterCheckedRef.current = true
+                clearFirstChapterEntry(setSearchParams)
             })
             .catch(() => {
-                // Ignore — non-critical check
+                firstChapterCheckInFlightRef.current = false
             })
-    }, [projectId, addToast])
+            .finally(() => {
+                if (firstChapterCheckedRef.current) {
+                    firstChapterCheckInFlightRef.current = false
+                }
+            })
+    }, [projectId, searchParams, setSearchParams, addToast])
 
     /* ── Escape 退出阅读模式 ── */
     useEffect(() => {
@@ -437,6 +464,9 @@ export default function WritingConsolePage() {
         })
     }, [addToast])
 
+    const getGuidedErrorDetail = useCallback((message: string) => {
+        return guideGenerationError(message).suggestion
+    }, [])
 
     /* ── 开始生成 ── */
     function handleStart() {
@@ -464,7 +494,7 @@ export default function WritingConsolePage() {
                         { label: '从断点续写', onClick: () => void handleContinueFromLatest() },
                         { label: '重新开始', onClick: () => { stop(); handleStart() } },
                     ],
-                    detail: err,
+                    detail: getGuidedErrorDetail(err),
                 })
                 addRecord({ type: 'generate', description: '流式生成中断', status: 'error', retryAction: () => void handleContinueFromLatest() })
             },
@@ -516,7 +546,7 @@ export default function WritingConsolePage() {
                             { label: '继续续写', onClick: () => void handleContinueFromLatest() },
                             { label: '重新开始', onClick: () => { stop(); void handleContinueFromLatest() } },
                         ],
-                        detail: err,
+                        detail: getGuidedErrorDetail(err),
                     })
                     addRecord({ type: 'generate', description: '续写任务中断', status: 'error', retryAction: () => void handleContinueFromLatest() })
                 },
@@ -528,7 +558,7 @@ export default function WritingConsolePage() {
         } catch (error: any) {
             addToast('error', '准备续写失败', {
                 context: '续写任务',
-                detail: error?.response?.data?.detail || error?.message,
+                detail: getGuidedErrorDetail(error?.response?.data?.detail || error?.message || '准备续写失败'),
             })
         } finally {
             setContinuationPreparing(false)

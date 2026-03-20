@@ -92,6 +92,7 @@ const approvedChapterWithEmptyDraft = {
 const mockApiGet = vi.fn()
 const mockApiPost = vi.fn()
 const mockApiPut = vi.fn()
+const mockApiPatch = vi.fn()
 const mockApiDelete = vi.fn()
 
 vi.mock('../../lib/api', () => ({
@@ -100,6 +101,7 @@ vi.mock('../../lib/api', () => ({
         get: (...args: any[]) => mockApiGet(...args),
         post: (...args: any[]) => mockApiPost(...args),
         put: (...args: any[]) => mockApiPut(...args),
+        patch: (...args: any[]) => mockApiPatch(...args),
         delete: (...args: any[]) => mockApiDelete(...args),
     },
 }))
@@ -126,6 +128,7 @@ const mockFetchChapters = vi.fn()
 const mockFetchProject = vi.fn()
 const mockInvalidateCache = vi.fn()
 const mockAddAccess = vi.fn()
+let mockCurrentProject = { id: 'proj-1', name: '霜城编年史' as string, fanqie_book_id: '' as string }
 const mockStoreChapters = [
     { id: 'ch-1', chapter_number: 1, title: '雪夜惊变', goal: '', status: 'draft', word_count: 18, conflict_count: 1 },
     { id: 'ch-2', chapter_number: 2, title: '潜伏反击', goal: '', status: 'draft', word_count: 1200, conflict_count: 0 },
@@ -134,7 +137,7 @@ const mockStoreChapters = [
 vi.mock('../../stores/useProjectStore', () => ({
     useProjectStore: (selector: (s: any) => any) =>
         selector({
-            currentProject: { id: 'proj-1', name: '霜城编年史' },
+            currentProject: mockCurrentProject,
             chapters: mockStoreChapters,
             fetchChapters: mockFetchChapters,
             fetchProject: mockFetchProject,
@@ -184,9 +187,11 @@ describe('ChapterWorkbenchPage', () => {
     beforeEach(() => {
         vi.clearAllMocks()
         mockReadingMode = false
+        mockCurrentProject = { id: 'proj-1', name: '霜城编年史', fanqie_book_id: '' }
         mockApiGet.mockResolvedValue({ data: sampleChapter })
         mockApiPost.mockResolvedValue({ data: {} })
         mockApiPut.mockResolvedValue({ data: { chapter: sampleChapter } })
+        mockApiPatch.mockResolvedValue({ data: {} })
         mockApiDelete.mockResolvedValue({ data: { status: 'deleted' } })
     })
 
@@ -332,6 +337,30 @@ describe('ChapterWorkbenchPage', () => {
                 expect.objectContaining({ timeout: 300000 }),
             )
         })
+    })
+
+    it('book_id 输入框会在用户编辑后仍跟随项目 store 刷新后的值更新', async () => {
+        const view = renderPage()
+        await waitFor(() => {
+            expect(screen.getByText('book_id：')).toBeTruthy()
+        })
+
+        const input = screen.getByPlaceholderText('未绑定') as HTMLInputElement
+        fireEvent.change(input, { target: { value: ' 7600000000000000000 ' } })
+        expect(input.value).toBe(' 7600000000000000000 ')
+
+        mockCurrentProject = { ...mockCurrentProject, fanqie_book_id: '7600000000000000000' }
+        view.rerender(
+            <MemoryRouter initialEntries={['/project/proj-1/chapter/ch-1']}>
+                <Routes>
+                    <Route path="/project/:projectId/chapter/:chapterId" element={<ChapterWorkbenchPage />} />
+                    <Route path="/project/:projectId" element={<div>项目详情页</div>} />
+                    <Route path="/project/:projectId/trace/:chapterId" element={<div>决策回放页</div>} />
+                </Routes>
+            </MemoryRouter>,
+        )
+
+        expect((screen.getByPlaceholderText('未绑定') as HTMLInputElement).value).toBe('7600000000000000000')
     })
 
     it('未登录时创建书本会自动打开番茄登录窗口', async () => {
