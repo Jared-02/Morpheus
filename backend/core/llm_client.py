@@ -18,15 +18,15 @@ class LLMConfig:
         provider: LLMProvider = LLMProvider.DEEPSEEK,
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
-        model: str = "deepseek-chat",
-        embedding_model: str = "deepseek-embedding",
+        model: Optional[str] = None,
+        embedding_model: Optional[str] = None,
         embedding_dimension: int = 1536,
         chat_max_tokens: Optional[int] = None,
         chat_temperature: Optional[float] = None,
         context_window_tokens: Optional[int] = None,
     ):
         self.provider = provider
-        self.embedding_model = embedding_model
+        self.embedding_model = embedding_model or "deepseek-embedding"
         self.embedding_dimension = embedding_dimension
 
         # Generic defaults
@@ -45,6 +45,7 @@ class LLMConfig:
                 or "https://api.openai.com/v1"
             )
             self.model = model or "gpt-4o"
+            self.embedding_model = embedding_model or "text-embedding-3-small"
         else:
             default_key = os.getenv("DEEPSEEK_API_KEY")
             self.base_url = (
@@ -54,6 +55,7 @@ class LLMConfig:
                 or "https://api.deepseek.com"
             )
             self.model = model or "deepseek-chat"
+            self.embedding_model = embedding_model or "deepseek-embedding"
             default_chat_max_tokens = _safe_positive_int(
                 os.getenv("DEEPSEEK_MAX_TOKENS"), 8192
             )
@@ -187,6 +189,12 @@ class LLMClient:
             "Content-Type": "application/json",
         }
 
+    def _supports_stream_options(self) -> bool:
+        if self.config.provider != LLMProvider.OPENAI_COMPATIBLE:
+            return False
+        normalized_base_url = (self.config.base_url or "").strip().rstrip("/").lower()
+        return normalized_base_url.startswith("https://api.openai.com")
+
     def chat(
         self,
         messages: List[Dict[str, str]],
@@ -209,13 +217,16 @@ class LLMClient:
             actual_max_tokens = _safe_positive_int(max_tokens, self.config.chat_max_tokens)
             actual_temperature = _safe_temperature(temperature, self.config.chat_temperature)
             client = self._get_openai_client()
-            response = client.chat.completions.create(
-                model=self.config.model,
-                messages=messages,
-                temperature=actual_temperature,
-                max_tokens=actual_max_tokens,
-                stream=bool(stream),
-            )
+            create_kwargs = {
+                "model": self.config.model,
+                "messages": messages,
+                "temperature": actual_temperature,
+                "max_tokens": actual_max_tokens,
+                "stream": bool(stream),
+            }
+            if stream and self._supports_stream_options():
+                create_kwargs["stream_options"] = {"include_usage": True}
+            response = client.chat.completions.create(**create_kwargs)
 
             if stream:
                 return response
@@ -269,10 +280,24 @@ class LLMClient:
             offline = self._offline_chat(messages)
             for ch in offline:
                 yield ch
+            if on_usage:
+                prompt_text = " ".join(m.get("content", "") for m in messages)
+                info = UsageInfo(
+                    prompt_tokens=_estimate_tokens(prompt_text),
+                    completion_tokens=_estimate_tokens(offline),
+                    estimated=True,
+                )
+                info.total_tokens = info.prompt_tokens + info.completion_tokens
+                try:
+                    on_usage(info)
+                except Exception:
+                    self._logger.debug("on_usage callback failed", exc_info=True)
             return
 
         started = time.perf_counter()
         emitted_chars = 0
+        emitted_text_parts: List[str] = []
+        stream_response = None
         try:
             stream_response = self.chat(
                 messages=messages,
@@ -280,11 +305,28 @@ class LLMClient:
                 max_tokens=max_tokens,
                 stream=True,
             )
+            if isinstance(stream_response, str):
+                for ch in stream_response:
+                    yield ch
+                if on_usage:
+                    prompt_text = " ".join(m.get("content", "") for m in messages)
+                    info = UsageInfo(
+                        prompt_tokens=_estimate_tokens(prompt_text),
+                        completion_tokens=_estimate_tokens(stream_response),
+                        estimated=True,
+                    )
+                    info.total_tokens = info.prompt_tokens + info.completion_tokens
+                    try:
+                        on_usage(info)
+                    except Exception:
+                        self._logger.debug("on_usage callback failed", exc_info=True)
+                return
             usage_data = None
             for chunk in stream_response:
                 text = self._extract_sdk_delta_text(chunk)
                 if text:
                     emitted_chars += len(text)
+                    emitted_text_parts.append(text)
                     yield text
                 chunk_usage = getattr(chunk, "usage", None)
                 if chunk_usage:
@@ -307,9 +349,10 @@ class LLMClient:
                     )
                 else:
                     prompt_text = " ".join(m.get("content", "") for m in messages)
+                    emitted_text = "".join(emitted_text_parts)
                     info = UsageInfo(
                         prompt_tokens=_estimate_tokens(prompt_text),
-                        completion_tokens=_estimate_tokens("a" * emitted_chars),
+                        completion_tokens=_estimate_tokens(emitted_text),
                         estimated=True,
                     )
                     info.total_tokens = info.prompt_tokens + info.completion_tokens
@@ -327,6 +370,25 @@ class LLMClient:
             offline = self._offline_chat(messages)
             for ch in offline:
                 yield ch
+            if on_usage:
+                prompt_text = " ".join(m.get("content", "") for m in messages)
+                info = UsageInfo(
+                    prompt_tokens=_estimate_tokens(prompt_text),
+                    completion_tokens=_estimate_tokens(offline),
+                    estimated=True,
+                )
+                info.total_tokens = info.prompt_tokens + info.completion_tokens
+                try:
+                    on_usage(info)
+                except Exception:
+                    self._logger.debug("on_usage callback failed", exc_info=True)
+        finally:
+            close = getattr(stream_response, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:
+                    self._logger.debug("stream close failed", exc_info=True)
 
     def embed_text(self, text: str) -> List[float]:
         return self._embed_via_api(text)
@@ -442,6 +504,7 @@ _PROVIDER_MAP = {
     "deepseek": LLMProvider.DEEPSEEK,
     "openai": LLMProvider.OPENAI_COMPATIBLE,
     "openai_compatible": LLMProvider.OPENAI_COMPATIBLE,
+    "minimax": LLMProvider.OPENAI_COMPATIBLE,
 }
 
 

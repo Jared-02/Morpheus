@@ -1,7 +1,49 @@
+import asyncio
+import json
+import os
+import types
 import unittest
+from unittest.mock import patch
 
 from agents.studio import StudioWorkflow
-from models import Chapter
+from core.chapter_craft import build_locked_facts, build_setter_constraints
+from models import AgentRole, Chapter, ChapterPlan, EntityState, EventEdge
+
+
+class _ScriptedAgent:
+    def __init__(self, responses):
+        self._responses = list(responses)
+
+    async def think(self, _context):
+        if not self._responses:
+            raise AssertionError("unexpected think call")
+        response = self._responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+    def decide(self, _context, _input_refs):
+        return types.SimpleNamespace(decision_text="", reasoning="")
+
+
+class _FakeStudio:
+    def __init__(self, agents):
+        self._agents = agents
+        self.trace = None
+        self.enforce_remote_mode = False
+        self.final_draft = None
+
+    def get_agent(self, role):
+        return self._agents[role]
+
+    def add_memory_hits(self, _hits):
+        return None
+
+    def add_decision(self, _decision):
+        return None
+
+    def set_final_draft(self, draft: str):
+        self.final_draft = draft
 
 
 class StudioPlanParserTest(unittest.TestCase):
@@ -77,6 +119,273 @@ class StudioPlanParserTest(unittest.TestCase):
         self.assertIn(quality["status"], {"warn", "bad"})
         self.assertGreaterEqual(quality.get("template_phrase_hits", 0), 2)
         self.assertTrue(any("模板化" in item for item in quality.get("issues", [])))
+
+    def test_extract_plan_payload_ignores_half_wired_character_decisions(self):
+        workflow = self._workflow()
+        chapter = self._chapter()
+        text = json.dumps(
+            {
+                "title": chapter.title,
+                "beats": ["陈砚潜入旧镜城节点并切断追踪锚点。"],
+                "conflicts": ["外部：守卫逼近。", "内部：是否暴露盟友身份。"],
+                "foreshadowing": ["旧镜城回路中埋着童年线索。"],
+                "callback_targets": ["回收六边形符号来源。"],
+                "role_goals": {"陈砚": "拿到真实入口坐标。"},
+                "character_decisions": [
+                    {"character": "陈砚", "beat_index": 0, "choice": "断开主链路"}
+                ],
+            },
+            ensure_ascii=False,
+        )
+
+        parsed = workflow._extract_plan_payload(text, chapter)
+
+        self.assertNotIn("character_decisions", parsed)
+        self.assertEqual(parsed["role_goals"].get("陈砚"), "拿到真实入口坐标。")
+
+    def test_chapter_plan_model_ignores_character_decisions_extra(self):
+        plan = ChapterPlan.model_validate(
+            {
+                "id": "plan-1",
+                "chapter_id": 1,
+                "title": "密钥的最后一次校准",
+                "goal": "定位初始密钥",
+                "beats": ["陈砚切断追踪锚点。"],
+                "character_decisions": [
+                    {"character": "陈砚", "beat_index": 0, "choice": "断开主链路"}
+                ],
+            }
+        )
+
+        self.assertNotIn("character_decisions", plan.model_dump())
+
+    def test_generate_draft_quality_uses_actual_target_words(self):
+        chapter = self._chapter()
+        plan = ChapterPlan(
+            id="plan-1",
+            chapter_id=1,
+            title=chapter.title,
+            goal=chapter.goal,
+            beats=["陈砚进入旧镜城节点并发现诱饵密钥正在倒计时。"],
+            conflicts=["外部：深网防御系统压缩撤离窗口。"],
+        )
+        director_text = "陈砚进入旧镜城节点并发现诱饵密钥正在倒计时。"
+        setter_text = "保持旧镜城坐标与上一章一致。"
+        stylist_text = "钟楼风声像倒计时一样压在他耳边。"
+        final_text = "甲" * 1600
+
+        studio = _FakeStudio(
+            {
+                AgentRole.DIRECTOR: _ScriptedAgent([director_text]),
+                AgentRole.SETTER: _ScriptedAgent([setter_text]),
+                AgentRole.STYLIST: _ScriptedAgent([stylist_text]),
+                AgentRole.ARBITER: _ScriptedAgent([final_text]),
+            }
+        )
+        workflow = StudioWorkflow(studio=studio, memory_search_func=lambda *_args, **_kwargs: [])
+        captured: dict[str, object] = {}
+
+        def fake_assess(_draft, _chapter, _plan, context):
+            captured.update(context)
+            return {"score": 100, "length": 5}
+
+        with patch.object(workflow, "_assess_draft_quality", side_effect=fake_assess):
+            with patch.dict(os.environ, {"DRAFT_QUALITY_SCORING": "1"}, clear=False):
+                asyncio.run(
+                    workflow.generate_draft(
+                        chapter,
+                        plan,
+                        {
+                            "identity": "# IDENTITY",
+                            "project_style": "冷峻",
+                            "target_words": 3000,
+                        },
+                    )
+                )
+
+        self.assertEqual(captured.get("target_words"), 3000)
+
+    def test_generate_draft_quality_retry_failure_falls_back_to_first_draft(self):
+        chapter = self._chapter()
+        plan = ChapterPlan(
+            id="plan-1",
+            chapter_id=1,
+            title=chapter.title,
+            goal=chapter.goal,
+            beats=["陈砚在雪夜潜入旧镜城节点，强行校准密钥。"],
+            conflicts=["外部：守卫追至钟楼。"],
+        )
+        director_text = "陈砚在雪夜潜入旧镜城节点，强行校准密钥，钟楼回声催促他加快动作。"
+        setter_text = "保持旧镜城坐标与上一章一致。"
+        stylist_text = "雪粒敲在护栏上，像在给倒计时敲拍子。"
+        final_text = "甲" * 400
+
+        studio = _FakeStudio(
+            {
+                AgentRole.DIRECTOR: _ScriptedAgent([director_text]),
+                AgentRole.SETTER: _ScriptedAgent([setter_text]),
+                AgentRole.STYLIST: _ScriptedAgent([stylist_text]),
+                AgentRole.ARBITER: _ScriptedAgent([final_text, RuntimeError("retry failed")]),
+            }
+        )
+        workflow = StudioWorkflow(studio=studio, memory_search_func=lambda *_args, **_kwargs: [])
+
+        with patch.dict(os.environ, {"DRAFT_QUALITY_SCORING": "1"}, clear=False):
+            result = asyncio.run(
+                workflow.generate_draft(
+                    chapter,
+                    plan,
+                    {
+                        "identity": "# IDENTITY",
+                        "project_style": "冷峻",
+                        "target_words": 1600,
+                    },
+                )
+            )
+
+        self.assertEqual(result, workflow._sanitize_draft(final_text, chapter, plan))
+        self.assertEqual(studio.final_draft, final_text)
+        self.assertTrue(chapter.metadata.get("draft_quality_retried"))
+        self.assertEqual(chapter.metadata.get("draft_quality_retry_error"), "retry failed")
+
+    def test_assess_draft_quality_requires_target_words(self):
+        workflow = self._workflow()
+        chapter = self._chapter()
+        plan = ChapterPlan(
+            id="plan-1",
+            chapter_id=1,
+            title=chapter.title,
+            goal=chapter.goal,
+            beats=["陈砚进入旧镜城节点并发现诱饵密钥正在倒计时。"],
+            conflicts=["外部：深网防御系统压缩撤离窗口。"],
+        )
+
+        with self.assertRaises(ValueError):
+            workflow._assess_draft_quality("甲" * 1600, chapter, plan, {})
+
+    def test_build_locked_facts_recognizes_localized_status(self):
+        entity = EntityState(
+            entity_id="e-1",
+            entity_type="character",
+            name="陈砚",
+            attrs={"状态": "死亡"},
+            constraints=[],
+            first_seen_chapter=1,
+            last_seen_chapter=3,
+        )
+
+        facts = build_locked_facts(
+            entities=[entity],
+            events=[],
+            conflicts=[],
+            current_chapter=4,
+        )
+
+        self.assertTrue(any("角色已死亡" in item and "陈砚" in item for item in facts))
+
+    def test_build_setter_constraints_filters_by_beats(self):
+        entity_hit = EntityState(
+            entity_id="e-1",
+            entity_type="character",
+            name="陈砚",
+            attrs={"状态": "重伤", "位置": "旧镜城"},
+            constraints=[],
+            first_seen_chapter=1,
+            last_seen_chapter=5,
+        )
+        entity_miss = EntityState(
+            entity_id="e-2",
+            entity_type="character",
+            name="苏离",
+            attrs={"状态": "潜伏", "位置": "南港"},
+            constraints=[],
+            first_seen_chapter=1,
+            last_seen_chapter=5,
+        )
+        event_hit = EventEdge(
+            event_id="ev-1",
+            subject="陈砚",
+            relation="抵达",
+            object="旧镜城",
+            chapter=4,
+            description="陈砚潜入旧镜城布置假线索。",
+            confidence=1.0,
+        )
+        event_miss = EventEdge(
+            event_id="ev-2",
+            subject="苏离",
+            relation="潜伏",
+            object="南港",
+            chapter=4,
+            description="苏离仍留在南港观察商会。",
+            confidence=1.0,
+        )
+
+        constraints = build_setter_constraints(
+            entities=[entity_hit, entity_miss],
+            events=[event_hit, event_miss],
+            chapter_number=5,
+            beats=["陈砚在旧镜城钟楼切断追踪锚点。"],
+        )
+
+        joined = "\n".join(constraints)
+        self.assertIn("陈砚", joined)
+        self.assertIn("旧镜城", joined)
+        self.assertNotIn("苏离", joined)
+        self.assertNotIn("南港", joined)
+
+    def test_build_setter_constraints_zero_match_does_not_fallback_to_full_window(self):
+        entity = EntityState(
+            entity_id="e-1",
+            entity_type="character",
+            name="苏离",
+            attrs={"状态": "潜伏", "位置": "南港"},
+            constraints=[],
+            first_seen_chapter=1,
+            last_seen_chapter=5,
+        )
+        event = EventEdge(
+            event_id="ev-1",
+            subject="苏离",
+            relation="潜伏",
+            object="南港",
+            chapter=4,
+            description="苏离仍留在南港观察商会。",
+            confidence=1.0,
+        )
+
+        constraints = build_setter_constraints(
+            entities=[entity],
+            events=[event],
+            chapter_number=5,
+            beats=["陈砚在旧镜城钟楼切断追踪锚点。"],
+        )
+
+        self.assertEqual(constraints, [])
+
+    def test_build_setter_constraints_caps_entity_output(self):
+        entities = [
+            EntityState(
+                entity_id=f"e-{idx}",
+                entity_type="character",
+                name=f"角色{idx}",
+                attrs={"状态": "待命", "位置": "旧镜城"},
+                constraints=[],
+                first_seen_chapter=1,
+                last_seen_chapter=5,
+            )
+            for idx in range(1, 9)
+        ]
+
+        constraints = build_setter_constraints(
+            entities=entities,
+            events=[],
+            chapter_number=5,
+            beats=["旧镜城局势骤然收紧。"],
+        )
+
+        state_lines = [item for item in constraints if "当前状态" in item]
+        self.assertLessEqual(len(state_lines), 5)
 
 
 if __name__ == "__main__":

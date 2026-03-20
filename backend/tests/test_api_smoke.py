@@ -65,7 +65,7 @@ class NovelistApiSmokeTest(unittest.TestCase):
     def setUpClass(cls):
         cls.client = TestClient(app)
 
-    def _create_project(self, taboo_constraints=None):
+    def _create_project(self, synopsis=None, taboo_constraints=None):
         payload = {
             "name": f"测试项目-{uuid4().hex[:8]}",
             "genre": "奇幻",
@@ -73,6 +73,8 @@ class NovelistApiSmokeTest(unittest.TestCase):
             "target_length": 300000,
             "taboo_constraints": taboo_constraints or [],
         }
+        if synopsis is not None:
+            payload["synopsis"] = synopsis
         res = self.client.post("/api/projects", json=payload)
         self.assertEqual(res.status_code, 200)
         return res.json()["id"]
@@ -468,6 +470,273 @@ class NovelistApiSmokeTest(unittest.TestCase):
         identity = identity_res.json().get("content", "")
         self.assertIn("Template Rules", identity)
         self.assertIn("每章新增1个钩子", identity)
+
+    def test_patch_project_syncs_identity_and_normalizes_fanqie_book_id(self):
+        project_id = self._create_project(
+            synopsis="旧梗概",
+            taboo_constraints=["旧禁忌"],
+        )
+
+        patch_res = self.client.patch(
+            f"/api/projects/{project_id}",
+            json={
+                "style": "冷峻史诗",
+                "synopsis": "新梗概",
+                "taboo_constraints": ["新禁忌"],
+                "fanqie_book_id": " 12345 ",
+            },
+        )
+        self.assertEqual(patch_res.status_code, 200)
+
+        project_res = self.client.get(f"/api/projects/{project_id}")
+        self.assertEqual(project_res.status_code, 200)
+        payload = project_res.json()
+        self.assertEqual(payload.get("style"), "冷峻史诗")
+        self.assertEqual(payload.get("fanqie_book_id"), "12345")
+
+        identity_res = self.client.get(f"/api/identity/{project_id}")
+        self.assertEqual(identity_res.status_code, 200)
+        identity = identity_res.json().get("content", "")
+        self.assertIn("冷峻史诗", identity)
+        self.assertIn("新梗概", identity)
+        self.assertIn("新禁忌", identity)
+        self.assertNotIn("旧梗概", identity)
+
+    def test_patch_project_preserves_manual_identity_content(self):
+        project_id = self._create_project(
+            synopsis="旧梗概",
+            taboo_constraints=["旧禁忌"],
+        )
+
+        manual_identity = """# IDENTITY
+
+## World Rules
+- [世界规则]：主角不能复活
+
+## Character Hard Settings
+- [角色]：阿九怕火
+
+## Style Contract
+- 手工文风约束
+
+## Template Rules
+- 手工模板规则
+
+## Template Prompt Hint
+- 手工提示
+
+## Story Synopsis
+- 手工梗概
+
+## Hard Taboos
+- 手工禁忌
+"""
+        update_identity_res = self.client.put(
+            f"/api/identity/{project_id}",
+            json={"content": manual_identity},
+        )
+        self.assertEqual(update_identity_res.status_code, 200)
+
+        patch_res = self.client.patch(
+            f"/api/projects/{project_id}",
+            json={
+                "style": "冷峻史诗",
+                "synopsis": "新梗概",
+                "taboo_constraints": ["新禁忌"],
+            },
+        )
+        self.assertEqual(patch_res.status_code, 200)
+
+        identity_res = self.client.get(f"/api/identity/{project_id}")
+        self.assertEqual(identity_res.status_code, 200)
+        identity = identity_res.json().get("content", "")
+        self.assertIn("主角不能复活", identity)
+        self.assertIn("阿九怕火", identity)
+        self.assertIn("手工模板规则", identity)
+        self.assertIn("手工提示", identity)
+        self.assertIn("手工梗概", identity)
+        self.assertIn("手工禁忌", identity)
+        self.assertIn("冷峻史诗", identity)
+        self.assertIn("新梗概", identity)
+        self.assertIn("新禁忌", identity)
+
+    def test_patch_project_preserves_template_default_taboos(self):
+        create_res = self.client.post(
+            "/api/projects",
+            json={
+                "name": f"模板项目-{uuid4().hex[:8]}",
+                "genre": "科幻喜剧",
+                "style": "吐槽热血",
+                "template_id": "serial-gintama",
+                "target_length": 320000,
+                "taboo_constraints": ["用户禁忌"],
+            },
+        )
+        self.assertEqual(create_res.status_code, 200)
+        project_id = create_res.json()["id"]
+
+        patch_res = self.client.patch(
+            f"/api/projects/{project_id}",
+            json={"taboo_constraints": ["新禁忌"]},
+        )
+        self.assertEqual(patch_res.status_code, 200)
+
+        project_res = self.client.get(f"/api/projects/{project_id}")
+        self.assertEqual(project_res.status_code, 200)
+        taboo_constraints = project_res.json().get("taboo_constraints") or []
+        self.assertIn("新禁忌", taboo_constraints)
+        self.assertIn("单章直接终结主线", taboo_constraints)
+
+        identity_res = self.client.get(f"/api/identity/{project_id}")
+        self.assertEqual(identity_res.status_code, 200)
+        identity = identity_res.json().get("content", "")
+        self.assertIn("新禁忌", identity)
+        self.assertIn("单章直接终结主线", identity)
+
+    def test_patch_project_rejects_noop_payload(self):
+        project_id = self._create_project()
+        patch_res = self.client.patch(f"/api/projects/{project_id}", json={})
+        self.assertEqual(patch_res.status_code, 400)
+
+    def test_rescan_empty_draft_cannot_be_approved(self):
+        project_id = self._create_project()
+        chapter_id = self._create_chapter(project_id, chapter_number=4)
+
+        rescan_res = self.client.post(
+            "/api/review",
+            json={"chapter_id": chapter_id, "action": "rescan"},
+        )
+        self.assertEqual(rescan_res.status_code, 200)
+        self.assertFalse(rescan_res.json().get("consistency", {}).get("can_submit"))
+
+        approve_res = self.client.post(
+            "/api/review",
+            json={"chapter_id": chapter_id, "action": "approve"},
+        )
+        self.assertEqual(approve_res.status_code, 400)
+        self.assertEqual(approve_res.json().get("detail"), "Chapter content is empty")
+
+    def test_rewrite_clears_final_and_blocks_stale_reapproval(self):
+        project_id = self._create_project()
+        chapter_id = self._create_chapter(project_id, chapter_number=5)
+        chapter = chapters[chapter_id]
+        chapter.final = "旧终稿"
+        chapter.status = ChapterStatus.APPROVED
+        save_chapter(chapter)
+
+        rewrite_res = self.client.post(
+            "/api/review",
+            json={"chapter_id": chapter_id, "action": "rewrite"},
+        )
+        self.assertEqual(rewrite_res.status_code, 200)
+        self.assertEqual(rewrite_res.json().get("status"), "draft")
+
+        rewritten = chapters[chapter_id]
+        self.assertIsNone(rewritten.draft)
+        self.assertIsNone(rewritten.final)
+
+        rescan_res = self.client.post(
+            "/api/review",
+            json={"chapter_id": chapter_id, "action": "rescan"},
+        )
+        self.assertEqual(rescan_res.status_code, 200)
+        self.assertFalse(rescan_res.json().get("consistency", {}).get("can_submit"))
+
+        approve_res = self.client.post(
+            "/api/review",
+            json={"chapter_id": chapter_id, "action": "approve"},
+        )
+        self.assertEqual(approve_res.status_code, 400)
+        self.assertEqual(approve_res.json().get("detail"), "Chapter content is empty")
+
+    def test_rewrite_clears_stale_conflicts(self):
+        project_id = self._create_project()
+        chapter_id = self._create_chapter(project_id, chapter_number=5)
+        chapter = chapters[chapter_id]
+        chapter.draft = "旧草稿"
+        chapter.final = "旧终稿"
+        chapter.status = ChapterStatus.REVIEWING
+        chapter.conflicts = [
+            Conflict(
+                id=str(uuid4()),
+                severity=Severity.P0,
+                rule_id="world_rule",
+                evidence_paths=["IDENTITY.md"],
+                reason="触发旧冲突",
+                chapter_id=chapter.chapter_number,
+            )
+        ]
+        chapter.p0_conflict_count = 1
+        save_chapter(chapter)
+
+        rewrite_res = self.client.post(
+            "/api/review",
+            json={"chapter_id": chapter_id, "action": "rewrite"},
+        )
+        self.assertEqual(rewrite_res.status_code, 200)
+
+        rewritten = chapters[chapter_id]
+        self.assertEqual(rewritten.conflicts, [])
+        self.assertEqual(rewritten.p0_conflict_count, 0)
+
+    def test_manual_empty_draft_clears_stale_final(self):
+        project_id = self._create_project()
+        chapter_id = self._create_chapter(project_id, chapter_number=5)
+        chapter = chapters[chapter_id]
+        chapter.final = "旧终稿"
+        chapter.status = ChapterStatus.APPROVED
+        save_chapter(chapter)
+
+        update_res = self.client.put(
+            f"/api/chapters/{chapter_id}/draft",
+            json={"draft": ""},
+        )
+        self.assertEqual(update_res.status_code, 200)
+
+        updated = chapters[chapter_id]
+        self.assertEqual(updated.draft, "")
+        self.assertIsNone(updated.final)
+        self.assertFalse(update_res.json().get("consistency", {}).get("can_submit"))
+
+        approve_res = self.client.post(
+            "/api/review",
+            json={"chapter_id": chapter_id, "action": "approve"},
+        )
+        self.assertEqual(approve_res.status_code, 400)
+        self.assertEqual(approve_res.json().get("detail"), "Chapter content is empty")
+
+    def test_rescan_rechecks_final_only_approved_chapter_against_updated_identity(self):
+        project_id = self._create_project()
+        chapter_id = self._create_chapter(project_id, chapter_number=6)
+        chapter = chapters[chapter_id]
+        chapter.draft = None
+        chapter.final = "在众人注视下，主角复活并再次走向战场。"
+        chapter.status = ChapterStatus.APPROVED
+        chapter.conflicts = []
+        chapter.p0_conflict_count = 0
+        save_chapter(chapter)
+
+        update_identity_res = self.client.put(
+            f"/api/identity/{project_id}",
+            json={"content": "# IDENTITY\n- [世界规则]：主角不能复活\n"},
+        )
+        self.assertEqual(update_identity_res.status_code, 200)
+
+        rescan_res = self.client.post(
+            "/api/review",
+            json={"chapter_id": chapter_id, "action": "rescan"},
+        )
+        self.assertEqual(rescan_res.status_code, 200)
+        consistency = rescan_res.json().get("consistency", {})
+        self.assertFalse(consistency.get("can_submit"))
+        self.assertGreaterEqual(consistency.get("p0_count", 0), 1)
+
+        approve_res = self.client.post(
+            "/api/review",
+            json={"chapter_id": chapter_id, "action": "approve"},
+        )
+        self.assertEqual(approve_res.status_code, 400)
+        self.assertEqual(approve_res.json().get("detail"), "P0 conflicts must be resolved before approval")
 
     def test_consistency_p0_conflict_blocks_approval(self):
         project_id = self._create_project(taboo_constraints=["禁词触发器"])

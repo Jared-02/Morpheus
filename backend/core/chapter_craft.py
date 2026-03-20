@@ -491,7 +491,10 @@ def build_locked_facts(
     _IRREVERSIBLE_KEYWORDS = frozenset({"death", "死亡", "消亡", "毁灭", "永久", "不可逆"})
 
     for entity in entities:
-        status = str(entity.attrs.get("status", "")).strip().lower()
+        status_value = entity.attrs.get("status")
+        if status_value in (None, ""):
+            status_value = entity.attrs.get("状态", "")
+        status = str(status_value or "").strip().lower()
         if status in _DEAD_STATUSES:
             facts.append(
                 f"【角色已死亡】{entity.name}（第{entity.last_seen_chapter}章），不得复活或出场"
@@ -540,11 +543,30 @@ def build_setter_constraints(
         "status", "location", "condition", "ability", "mood",
         "位置", "状态", "伤势", "能力",
     })
+    beats_text = "\n".join(
+        str(beat or "").strip() for beat in beats if str(beat or "").strip()
+    )
+
+    def _matches_beats(*values: object) -> bool:
+        if not beats_text:
+            return True
+        for value in values:
+            candidate = str(value or "").strip()
+            if candidate and candidate in beats_text:
+                return True
+        return False
 
     active_entities = [
         e for e in entities
         if e.last_seen_chapter >= chapter_number - window or e.constraints
     ]
+    if beats_text:
+        active_entities = [
+            entity
+            for entity in active_entities
+            if _matches_beats(entity.name, *entity.attrs.values(), *entity.constraints)
+        ]
+    active_entities = active_entities[:5]
 
     for entity in active_entities:
         state_parts = [
@@ -560,6 +582,17 @@ def build_setter_constraints(
         e for e in events
         if chapter_number - window <= e.chapter < chapter_number
     ]
+    if beats_text:
+        recent_events = [
+            event
+            for event in recent_events
+            if _matches_beats(
+                event.subject,
+                event.relation,
+                event.object,
+                event.description,
+            )
+        ]
     for event in recent_events[-10:]:
         parts = [event.subject, event.relation]
         if event.object:

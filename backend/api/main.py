@@ -22,7 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from starlette.background import BackgroundTask
 from starlette.middleware.trustedhost import TrustedHostMiddleware
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from agents.studio import AGENT_PROMPTS, AgentStudio, StudioWorkflow
@@ -3196,8 +3196,221 @@ def _derive_fanqie_role_candidates(project_id: str) -> List[str]:
     return names
 
 
-def _bind_project_fanqie_book_id(project: Project, book_id: str) -> bool:
+def _build_project_identity(project: Project) -> str:
+    selected_template = get_story_template(project.template_id)
+    identity = (
+        f"# {project.name} - IDENTITY\n\n"
+        "## World Rules\n"
+        f"- Genre: {project.genre}\n"
+        f"- Style: {project.style}\n\n"
+        "## Character Hard Settings\n- (待补充)\n\n"
+        "## Style Contract\n"
+        f"- {project.style}\n\n"
+        "## Story Template\n"
+    )
+    if selected_template:
+        identity += f"- {selected_template['name']} ({selected_template['category']})\n\n"
+        identity += "## Template Rules\n"
+        identity += "".join(f"- {rule}\n" for rule in selected_template.get("identity_rules", []))
+        identity += "\n## Template Prompt Hint\n"
+        identity += f"- {selected_template.get('prompt_hint', '')}\n\n"
+    else:
+        identity += "- (未指定)\n\n"
+    identity += "## Story Synopsis\n"
+    if project.synopsis:
+        identity += f"- {project.synopsis}\n\n"
+    else:
+        identity += "- (未提供)\n\n"
+    identity += "## Hard Taboos\n"
+    taboo_constraints = list(project.taboo_constraints or [])
+    if taboo_constraints:
+        identity += "".join(f"- {item}\n" for item in taboo_constraints)
+    else:
+        identity += "- (无)\n"
+    return identity
+
+
+def _normalize_identity_lines(lines: List[str]) -> List[str]:
+    normalized = list(lines)
+    while normalized and not normalized[0].strip():
+        normalized.pop(0)
+    while normalized and not normalized[-1].strip():
+        normalized.pop()
+    return normalized
+
+
+def _parse_identity_document(content: str) -> tuple[str, List[str], Dict[str, List[str]], List[str]]:
+    lines = (content or "").splitlines()
+    title = lines[0].strip() if lines else "# IDENTITY"
+    preamble: List[str] = []
+    sections: Dict[str, List[str]] = {}
+    section_order: List[str] = []
+    current_section: Optional[str] = None
+    current_lines: List[str] = []
+
+    for line in lines[1:]:
+        if line.startswith("## "):
+            if current_section is None:
+                preamble = _normalize_identity_lines(current_lines)
+            else:
+                sections[current_section] = _normalize_identity_lines(current_lines)
+                section_order.append(current_section)
+            current_section = line[3:].strip()
+            current_lines = []
+            continue
+        current_lines.append(line)
+
+    if current_section is None:
+        preamble = _normalize_identity_lines(current_lines)
+    else:
+        sections[current_section] = _normalize_identity_lines(current_lines)
+        section_order.append(current_section)
+
+    return title, preamble, sections, section_order
+
+
+def _merge_identity_section_lines(primary: List[str], secondary: List[str]) -> List[str]:
+    merged: List[str] = []
+    seen: Set[str] = set()
+    for line in [*primary, *secondary]:
+        key = line.strip()
+        if not key or key == "-" or key in seen:
+            continue
+        merged.append(line)
+        seen.add(key)
+    return merged
+
+
+def _extract_manual_identity_lines(
+    existing_lines: List[str],
+    previous_generated_lines: List[str],
+    ignored_lines: Set[str],
+) -> List[str]:
+    previous_generated_keys = {line.strip() for line in previous_generated_lines if line.strip()}
+    manual_lines: List[str] = []
+    seen: Set[str] = set()
+    for line in existing_lines:
+        key = line.strip()
+        if (
+            not key
+            or key == "-"
+            or key in ignored_lines
+            or key in previous_generated_keys
+            or key in seen
+        ):
+            continue
+        manual_lines.append(line)
+        seen.add(key)
+    return manual_lines
+
+
+def _merge_project_identity(
+    existing_identity: str,
+    project: Project,
+    previous_project: Optional[Project] = None,
+) -> str:
+    generated_identity = _build_project_identity(project)
+    generated_title, _generated_preamble, generated_sections, _generated_order = _parse_identity_document(
+        generated_identity
+    )
+    _existing_title, existing_preamble, existing_sections, existing_order = _parse_identity_document(
+        existing_identity
+    )
+
+    previous_generated_sections: Dict[str, List[str]] = {}
+    if previous_project is not None:
+        (
+            _previous_title,
+            _previous_preamble,
+            previous_generated_sections,
+            _previous_order,
+        ) = _parse_identity_document(_build_project_identity(previous_project))
+
+    known_section_order = [
+        "World Rules",
+        "Character Hard Settings",
+        "Style Contract",
+        "Story Template",
+        "Template Rules",
+        "Template Prompt Hint",
+        "Story Synopsis",
+        "Hard Taboos",
+    ]
+    section_placeholders: Dict[str, Set[str]] = {
+        "World Rules": {"- (补充世界规则)"},
+        "Character Hard Settings": {"- (待补充)"},
+        "Style Contract": {"- (补充写作风格约束)"},
+        "Story Template": {"- (未指定)"},
+        "Story Synopsis": {"- (未提供)"},
+        "Hard Taboos": {"- (无)"},
+        "Template Prompt Hint": {"-"},
+    }
+
+    merged_sections: Dict[str, List[str]] = {}
+    for section_name in known_section_order:
+        generated_lines = generated_sections.get(section_name, [])
+        existing_lines = existing_sections.get(section_name, [])
+        previous_generated_lines = previous_generated_sections.get(section_name, [])
+        manual_lines = _extract_manual_identity_lines(
+            existing_lines,
+            previous_generated_lines,
+            section_placeholders.get(section_name, set()),
+        )
+        if section_name == "Character Hard Settings":
+            section_lines = manual_lines or generated_lines
+        else:
+            section_lines = _merge_identity_section_lines(generated_lines, manual_lines)
+        if section_lines:
+            merged_sections[section_name] = section_lines
+
+    extra_section_order = [name for name in existing_order if name not in known_section_order]
+
+    parts: List[str] = [generated_title]
+    if existing_preamble:
+        parts.extend(["", *existing_preamble])
+
+    for section_name in [*known_section_order, *extra_section_order]:
+        section_lines = merged_sections.get(section_name)
+        if section_lines is None:
+            if section_name in extra_section_order:
+                section_lines = existing_sections.get(section_name, [])
+            else:
+                continue
+        parts.extend(["", f"## {section_name}"])
+        if section_lines:
+            parts.extend(section_lines)
+
+    return "\n".join(parts).strip() + "\n"
+
+
+def _sync_project_identity(project: Project, previous_project: Optional[Project] = None) -> None:
+    store = get_or_create_store(project.id)
+    existing_identity = store.three_layer.get_identity()
+    merged_identity = _merge_project_identity(
+        existing_identity=existing_identity,
+        project=project,
+        previous_project=previous_project,
+    )
+    store.three_layer.update_identity(merged_identity)
+    store.sync_file_memories()
+
+
+def _merge_taboo_constraints_with_template(
+    taboo_constraints: Optional[List[str]],
+    template_id: Optional[str],
+) -> List[str]:
+    selected_template = get_story_template(template_id)
+    template_taboos = selected_template.get("default_taboos", []) if selected_template else []
+    return list(dict.fromkeys([*(taboo_constraints or []), *template_taboos]))
+
+
+def _normalize_fanqie_book_id(book_id: Any) -> Optional[str]:
     normalized = str(book_id or "").strip()
+    return normalized or None
+
+
+def _bind_project_fanqie_book_id(project: Project, book_id: str) -> bool:
+    normalized = _normalize_fanqie_book_id(book_id)
     if not normalized:
         return False
     if getattr(project, "fanqie_book_id", None) == normalized:
@@ -3552,8 +3765,7 @@ async def create_project(req: CreateProjectRequest):
     if req.template_id and not selected_template:
         raise HTTPException(status_code=400, detail="Unknown story template")
 
-    template_taboos = selected_template.get("default_taboos", []) if selected_template else []
-    merged_taboos = list(dict.fromkeys([*req.taboo_constraints, *template_taboos]))
+    merged_taboos = _merge_taboo_constraints_with_template(req.taboo_constraints, req.template_id)
 
     recommended_target_length = (
         selected_template.get("recommended", {}).get("target_length") if selected_template else None
@@ -3585,37 +3797,7 @@ async def create_project(req: CreateProjectRequest):
     (base / "graph").mkdir(parents=True, exist_ok=True)
     (base / "index" / "lancedb").mkdir(parents=True, exist_ok=True)
 
-    store = get_or_create_store(project_id)
-    identity = (
-        f"# {req.name} - IDENTITY\n\n"
-        "## World Rules\n"
-        f"- Genre: {req.genre}\n"
-        f"- Style: {req.style}\n\n"
-        "## Character Hard Settings\n- (待补充)\n\n"
-        "## Style Contract\n"
-        f"- {req.style}\n\n"
-        "## Story Template\n"
-    )
-    if selected_template:
-        identity += f"- {selected_template['name']} ({selected_template['category']})\n\n"
-        identity += "## Template Rules\n"
-        identity += "".join(f"- {rule}\n" for rule in selected_template.get("identity_rules", []))
-        identity += "\n## Template Prompt Hint\n"
-        identity += f"- {selected_template.get('prompt_hint', '')}\n\n"
-    else:
-        identity += "- (未指定)\n\n"
-    identity += "## Story Synopsis\n"
-    if project.synopsis:
-        identity += f"- {project.synopsis}\n\n"
-    else:
-        identity += "- (未提供)\n\n"
-    identity += "## Hard Taboos\n"
-    if merged_taboos:
-        identity += "".join(f"- {item}\n" for item in merged_taboos)
-    else:
-        identity += "- (无)\n"
-    store.three_layer.update_identity(identity)
-    store.sync_file_memories()
+    _sync_project_identity(project)
     logger.info(
         "project created project_id=%s name=%s genre=%s style=%s template=%s taboo_count=%d",
         project.id,
@@ -3953,16 +4135,45 @@ async def update_project(project_id: str, req: UpdateProjectRequest):
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    _UPDATABLE = {"name", "genre", "style", "synopsis", "fanqie_book_id", "target_length", "taboo_constraints"}
     updates = req.model_dump(exclude_unset=True)
-    for key, value in updates.items():
-        if key in _UPDATABLE:
-            setattr(project, key, value)
+    if not updates:
+        raise HTTPException(status_code=400, detail="No project fields to update")
 
-    if updates:
-        project.updated_at = datetime.now()
-        save_project(project)
-        projects[project_id] = project
+    normalized_updates: Dict[str, Any] = {}
+    for key, value in updates.items():
+        if key == "synopsis":
+            normalized_updates[key] = str(value or "").strip() or None
+        elif key == "fanqie_book_id":
+            normalized_updates[key] = _normalize_fanqie_book_id(value)
+        elif key == "taboo_constraints":
+            normalized_updates[key] = _merge_taboo_constraints_with_template(value, project.template_id)
+        else:
+            normalized_updates[key] = value
+
+    derived_identity_fields = {"name", "genre", "style", "synopsis", "taboo_constraints", "template_id"}
+    changed = False
+    should_sync_identity = False
+    previous_project = project.model_copy(deep=True)
+
+    for key, value in normalized_updates.items():
+        if not hasattr(project, key):
+            continue
+        if getattr(project, key) == value:
+            continue
+        setattr(project, key, value)
+        changed = True
+        if key in derived_identity_fields:
+            should_sync_identity = True
+
+    if not changed:
+        raise HTTPException(status_code=400, detail="No project fields changed")
+
+    project.updated_at = datetime.now()
+    save_project(project)
+    projects[project_id] = project
+
+    if should_sync_identity:
+        _sync_project_identity(project, previous_project=previous_project)
 
     return {"ok": True, "project_id": project_id}
 
@@ -4699,10 +4910,15 @@ async def get_chapter(chapter_id: str):
     return chapter.model_dump(mode="json")
 
 
-def _recompute_chapter_consistency(chapter: Chapter, project: Project) -> Dict[str, Any]:
+def _recompute_chapter_consistency(
+    chapter: Chapter,
+    project: Project,
+    text: Optional[str] = None,
+) -> Dict[str, Any]:
     store = get_or_create_store(chapter.project_id)
+    draft_text = chapter.draft if text is None else text
     consistency = ConsistencyEngine().check(
-        chapter.draft or "",
+        draft_text or "",
         {
             "chapter_id": chapter.chapter_number,
             "entities": store.get_all_entities(),
@@ -4711,6 +4927,8 @@ def _recompute_chapter_consistency(chapter: Chapter, project: Project) -> Dict[s
             "taboo_constraints": project.taboo_constraints,
         },
     )
+    if not str(draft_text or "").strip():
+        consistency["can_submit"] = False
     chapter.conflicts = [Conflict.model_validate(item) for item in consistency["conflicts"]]
     chapter.p0_conflict_count = int(consistency["p0_count"])
     if chapter.first_pass_ok is None:
@@ -4741,6 +4959,8 @@ async def update_draft(chapter_id: str, payload: UpdateDraftRequest):
         raise HTTPException(status_code=404, detail="Project not found")
 
     chapter.draft = payload.draft
+    if not str(payload.draft or "").strip():
+        chapter.final = None
     chapter.word_count = len(payload.draft)
     chapter.status = ChapterStatus.REVIEWING
 
@@ -5825,6 +6045,9 @@ async def review_chapter(req: ReviewRequest):
     consistency = None
 
     if req.action == ReviewAction.APPROVE:
+        persisted_text = str(chapter.final or chapter.draft or "").strip()
+        if not persisted_text:
+            raise HTTPException(status_code=400, detail="Chapter content is empty")
         p0_conflicts = [
             conflict
             for conflict in chapter.conflicts
@@ -5840,7 +6063,7 @@ async def review_chapter(req: ReviewRequest):
                 ",".join(conflict_log["rule_ids"]),
             )
             raise HTTPException(status_code=400, detail=P0_APPROVAL_BLOCK_MESSAGE)
-        chapter.final = chapter.draft
+        chapter.final = chapter.draft or chapter.final
         chapter.status = ChapterStatus.APPROVED
         if chapter.final:
             store = get_or_create_store(chapter.project_id)
@@ -5897,16 +6120,23 @@ async def review_chapter(req: ReviewRequest):
     elif req.action == ReviewAction.REWRITE:
         chapter.status = ChapterStatus.DRAFT
         chapter.draft = None
+        chapter.final = None
+        chapter.word_count = 0
+        chapter.conflicts = []
+        chapter.p0_conflict_count = 0
     elif req.action == ReviewAction.RESCAN:
         chapter.status = ChapterStatus.REVIEWING
         draft_text = str(chapter.draft or "").strip()
+        final_text = str(chapter.final or "").strip()
         if draft_text:
             consistency = _recompute_chapter_consistency(chapter, project)
+        elif final_text:
+            consistency = _recompute_chapter_consistency(chapter, project, text=chapter.final)
         else:
             chapter.conflicts = []
             chapter.p0_conflict_count = 0
             consistency = {
-                "can_submit": True,
+                "can_submit": False,
                 "total_conflicts": 0,
                 "p0_count": 0,
                 "p1_count": 0,

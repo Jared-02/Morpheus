@@ -12,7 +12,7 @@ os.environ["L4_PROFILE_ENABLED"] = "true"
 os.environ["L4_AUTO_EXTRACT_ENABLED"] = "true"
 
 from fastapi.testclient import TestClient
-from api.main import app
+from api.main import app, save_chapter
 
 
 class TestL4AutoTrigger(unittest.TestCase):
@@ -55,6 +55,7 @@ class TestL4AutoTrigger(unittest.TestCase):
 
         chapter = chapters[pid][cid]
         chapter.draft = "第一章正文内容，张三出场。"
+        save_chapter(chapter)
 
         with patch(
             "api.main.trigger_l4_extraction_async",

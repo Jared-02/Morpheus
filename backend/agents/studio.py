@@ -581,6 +581,7 @@ class StudioWorkflow:
             "previous_chapter_synopsis": context.get("previous_chapter_synopsis", ""),
             "open_threads": context.get("open_threads", []),
             "project_style": context.get("project_style", ""),
+            "target_words": target_words,
             "memory_hits": memory_hits[:12],
             "previous_chapters": context.get("previous_chapters", []),
             "rhythm_hint": rhythm_hint,
@@ -664,35 +665,53 @@ class StudioWorkflow:
         sanitized = self._sanitize_draft(final_text, chapter, plan)
 
         if os.getenv("DRAFT_QUALITY_SCORING", "").strip().lower() in ("1", "true", "yes"):
-            quality = self._assess_draft_quality(sanitized, chapter, plan, draft_context)
-            chapter.metadata["draft_quality"] = quality
-            if quality["score"] < 60:
-                logger.info(
-                    "draft quality low score=%d chapter=%d, retrying arbiter",
-                    quality["score"],
+            try:
+                quality = self._assess_draft_quality(sanitized, chapter, plan, draft_context)
+                chapter.metadata["draft_quality"] = quality
+                if quality["score"] < 60:
+                    logger.info(
+                        "draft quality low score=%d chapter=%d, retrying arbiter",
+                        quality["score"],
+                        chapter.chapter_number,
+                    )
+                    chapter.metadata["draft_quality_retried"] = True
+                    try:
+                        retry_text = await arbiter.think(
+                            {
+                                **draft_context,
+                                "draft": director_text,
+                                "setter_feedback": setter_text,
+                                "stylist_draft": stylist_text,
+                                "quality_feedback": quality,
+                                "instruction": (
+                                    "上一稿质量评分不足，请根据 quality_feedback 改进后重新输出最终正文。"
+                                    "只输出正文，不要解释，不要标题。"
+                                    f"{length_instruction}"
+                                ),
+                            }
+                        )
+                        retry_sanitized = self._sanitize_draft(retry_text, chapter, plan)
+                        retry_quality = self._assess_draft_quality(
+                            retry_sanitized, chapter, plan, draft_context
+                        )
+                        chapter.metadata["draft_quality"] = retry_quality
+                        chapter.metadata.pop("draft_quality_retry_error", None)
+                        sanitized = retry_sanitized
+                        final_text = retry_text
+                    except Exception as exc:
+                        chapter.metadata["draft_quality_retry_error"] = str(exc)
+                        logger.warning(
+                            "draft quality retry failed chapter=%d error=%s fallback=first_draft",
+                            chapter.chapter_number,
+                            exc,
+                        )
+            except Exception as exc:
+                chapter.metadata["draft_quality_error"] = str(exc)
+                logger.warning(
+                    "draft quality scoring failed chapter=%d error=%s fallback=first_draft",
                     chapter.chapter_number,
+                    exc,
                 )
-                retry_text = await arbiter.think(
-                    {
-                        **draft_context,
-                        "draft": director_text,
-                        "setter_feedback": setter_text,
-                        "stylist_draft": stylist_text,
-                        "quality_feedback": quality,
-                        "instruction": (
-                            "上一稿质量评分不足，请根据 quality_feedback 改进后重新输出最终正文。"
-                            "只输出正文，不要解释，不要标题。"
-                            f"{length_instruction}"
-                        ),
-                    }
-                )
-                sanitized = self._sanitize_draft(retry_text, chapter, plan)
-                retry_quality = self._assess_draft_quality(
-                    sanitized, chapter, plan, draft_context
-                )
-                chapter.metadata["draft_quality"] = retry_quality
-                chapter.metadata["draft_quality_retried"] = True
-                final_text = retry_text
 
         self.studio.set_final_draft(final_text)
         return sanitized
@@ -745,6 +764,7 @@ class StudioWorkflow:
             "previous_chapter_synopsis": context.get("previous_chapter_synopsis", ""),
             "open_threads": context.get("open_threads", []),
             "project_style": context.get("project_style", ""),
+            "target_words": target_words,
             "memory_hits": memory_hits[:12],
             "previous_chapters": context.get("previous_chapters", []),
             "rhythm_hint": rhythm_hint,
@@ -1436,7 +1456,9 @@ class StudioWorkflow:
         context: Dict[str, Any],
     ) -> Dict[str, Any]:
         """5-dimension draft quality assessment (0-100). Returns score + breakdown."""
-        target_words = int(context.get("target_words", 1600) or 1600)
+        if context.get("target_words") in (None, ""):
+            raise ValueError("target_words is required for draft quality assessment")
+        target_words = int(context["target_words"])
         text = (draft or "").strip()
         char_count = len(text)
 
