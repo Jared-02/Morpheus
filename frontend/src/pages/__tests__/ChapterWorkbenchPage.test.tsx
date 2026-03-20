@@ -339,6 +339,15 @@ describe('ChapterWorkbenchPage', () => {
         })
     })
 
+    it('book_id 输入框提供可访问名称', async () => {
+        renderPage()
+        await waitFor(() => {
+            expect(screen.getByText('book_id：')).toBeTruthy()
+        })
+
+        expect(screen.getByLabelText('番茄 book_id')).toBeTruthy()
+    })
+
     it('book_id 输入框会在用户编辑后仍跟随项目 store 刷新后的值更新', async () => {
         const view = renderPage()
         await waitFor(() => {

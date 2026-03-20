@@ -1330,6 +1330,7 @@ export default function ChapterWorkbenchPage() {
                                 <input
                                     type="text"
                                     className="input"
+                                    aria-label="番茄 book_id"
                                     style={{ width: 120, fontSize: '0.78rem', padding: '2px 6px' }}
                                     value={fanqieBookIdInput}
                                     placeholder="未绑定"
