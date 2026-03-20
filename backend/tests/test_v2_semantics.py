@@ -49,7 +49,7 @@ class V2SemanticsTest(unittest.TestCase):
         self.assertIn("Story Synopsis", identity)
         self.assertIn("主角在霜城发现王室血脉秘密", identity)
 
-    def test_one_shot_book_accepts_batch_direction_alias(self):
+    def test_one_shot_book_returns_canonical_batch_direction_field(self):
         create_res = self.client.post(
             "/api/projects",
             json={
@@ -75,7 +75,8 @@ class V2SemanticsTest(unittest.TestCase):
         self.assertEqual(batch_res.status_code, 200)
         payload = batch_res.json()
         self.assertEqual(payload["generated_chapters"], 1)
-        self.assertEqual(payload["prompt"], "主角在雪夜被背叛后潜伏反击，最终揪出幕后主使。")
+        self.assertEqual(payload["batch_direction"], "主角在雪夜被背叛后潜伏反击，最终揪出幕后主使。")
+        self.assertNotIn("prompt", payload)
 
     def test_one_shot_book_accepts_scope_field(self):
         create_res = self.client.post(

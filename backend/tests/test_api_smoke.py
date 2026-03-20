@@ -1187,7 +1187,7 @@ class NovelistApiSmokeTest(unittest.TestCase):
             self.assertIn("event: chapter_chunk", payload)
             self.assertIn("event: done", payload)
 
-    def test_one_shot_book_accepts_batch_direction_alias(self):
+    def test_one_shot_book_returns_canonical_batch_direction_field(self):
         project_id = self._create_project()
         batch_res = self.client.post(
             f"/api/projects/{project_id}/one-shot-book",
@@ -1199,10 +1199,12 @@ class NovelistApiSmokeTest(unittest.TestCase):
             },
         )
         self.assertEqual(batch_res.status_code, 200)
-        self.assertEqual(batch_res.json()["generated_chapters"], 1)
+        payload = batch_res.json()
+        self.assertEqual(payload["generated_chapters"], 1)
         self.assertEqual(
-            batch_res.json()["prompt"], "主角在雪夜被背叛后潜伏反击，最终揪出幕后主使。"
+            payload["batch_direction"], "主角在雪夜被背叛后潜伏反击，最终揪出幕后主使。"
         )
+        self.assertNotIn("prompt", payload)
 
     def test_consistency_p0_check_endpoint(self):
         project_id = self._create_project(taboo_constraints=["禁止词"])

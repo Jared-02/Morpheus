@@ -4615,7 +4615,7 @@ async def run_one_shot_book_generation(
     response_payload = {
         "project_id": project_id,
         "mode": req.mode.value,
-        "prompt": req.batch_direction.strip(),
+        "batch_direction": req.batch_direction.strip(),
         "continuation_mode": req.continuation_mode,
         "generated_chapters": len(created),
         "chapters": created,
