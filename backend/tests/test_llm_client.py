@@ -35,6 +35,19 @@ class FakeClient:
         return self._response
 
 
+class FakeEmbeddingsClient:
+    def __init__(self, response=None, exc=None):
+        self._response = response
+        self._exc = exc
+        self.calls = []
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        if self._exc:
+            raise self._exc
+        return self._response
+
+
 def test_chat_stream_text_falls_back_to_offline_text_when_stream_creation_fails():
     client = LLMClient(LLMConfig(provider=LLMProvider.DEEPSEEK, api_key="k"))
     client._client = FakeClient(exc=RuntimeError("boom"))
@@ -142,3 +155,27 @@ def test_chat_stream_text_omits_stream_options_for_minimax_base_url():
     assert "".join(chunks) == "你好"
     assert fake_client.calls[0]["stream"] is True
     assert "stream_options" not in fake_client.calls[0]
+
+
+def test_embed_text_uses_openai_embeddings_client():
+    fake_embeddings = FakeEmbeddingsClient(
+        response=types.SimpleNamespace(data=[types.SimpleNamespace(embedding=[0.1, 0.2, 0.3])])
+    )
+    client = LLMClient(LLMConfig(provider=LLMProvider.OPENAI_COMPATIBLE, api_key="k", model="gpt-4o"))
+    client._client = types.SimpleNamespace(embeddings=fake_embeddings)
+
+    assert client.embed_text("hello") == [0.1, 0.2, 0.3]
+    assert fake_embeddings.calls[0]["model"] == client.config.embedding_model
+    assert fake_embeddings.calls[0]["input"] == "hello"
+
+
+def test_embed_batch_falls_back_to_offline_when_embeddings_create_fails():
+    fake_embeddings = FakeEmbeddingsClient(exc=RuntimeError("boom"))
+    client = LLMClient(LLMConfig(provider=LLMProvider.OPENAI_COMPATIBLE, api_key="k", model="gpt-4o"))
+    client._client = types.SimpleNamespace(embeddings=fake_embeddings)
+
+    result = client.embed_batch(["a", "b"])
+
+    assert len(result) == 2
+    assert all(isinstance(item, list) for item in result)
+    assert fake_embeddings.calls[0]["input"] == ["a", "b"]

@@ -2,7 +2,6 @@ import os
 import time
 import logging
 import json
-import requests
 from typing import Any, Callable, Dict, Iterator, List, Optional, Union
 from enum import Enum
 
@@ -182,12 +181,6 @@ class LLMClient:
             self.config.model,
             reason,
         )
-
-    def _request_headers(self) -> Dict[str, str]:
-        return {
-            "Authorization": f"Bearer {self.config.api_key}",
-            "Content-Type": "application/json",
-        }
 
     def _supports_stream_options(self) -> bool:
         if self.config.provider != LLMProvider.OPENAI_COMPATIBLE:
@@ -401,16 +394,13 @@ class LLMClient:
             self._warn_offline_once("embedding_missing_api_key")
             return self._offline_embedding(text)
         try:
-            response = requests.post(
-                f"{self.config.base_url}/embeddings",
-                headers=self._request_headers(),
-                json={"model": self.config.embedding_model, "input": text},
-                timeout=self._http_timeout,
+            client = self._get_openai_client()
+            response = client.embeddings.create(
+                model=self.config.embedding_model,
+                input=text,
             )
-            response.raise_for_status()
-            body = response.json()
-            data = (body.get("data") or [{}])[0] if isinstance(body, dict) else {}
-            embedding = data.get("embedding") if isinstance(data, dict) else None
+            data = getattr(response, "data", None)
+            embedding = data[0].embedding if data else None
             if not isinstance(embedding, list):
                 raise ValueError("embedding response missing embedding")
             return embedding
@@ -428,22 +418,20 @@ class LLMClient:
             self._warn_offline_once("embedding_batch_missing_api_key")
             return [self._offline_embedding(text) for text in texts]
         try:
-            response = requests.post(
-                f"{self.config.base_url}/embeddings",
-                headers=self._request_headers(),
-                json={"model": self.config.embedding_model, "input": texts},
-                timeout=self._http_timeout,
+            client = self._get_openai_client()
+            response = client.embeddings.create(
+                model=self.config.embedding_model,
+                input=texts,
             )
-            response.raise_for_status()
-            body = response.json()
-            data = body.get("data") if isinstance(body, dict) else None
+            data = getattr(response, "data", None)
             if not isinstance(data, list):
                 raise ValueError("embedding batch response missing data")
             embeddings: List[List[float]] = []
             for item in data:
-                if not isinstance(item, dict) or not isinstance(item.get("embedding"), list):
+                embedding = getattr(item, "embedding", None)
+                if not isinstance(embedding, list):
                     raise ValueError("embedding batch item malformed")
-                embeddings.append(item["embedding"])
+                embeddings.append(embedding)
             return embeddings
         except Exception as exc:
             self._logger.warning(
