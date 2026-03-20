@@ -533,7 +533,7 @@ def build_generation_memory_window(
         ]
 
     recent_events = [
-        event for event in events if chapter_number - window <= event.chapter <= chapter_number
+        event for event in events if chapter_number - window <= event.chapter < chapter_number
     ]
     if beats_text:
         recent_events = [

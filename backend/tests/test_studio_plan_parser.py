@@ -473,6 +473,37 @@ class StudioPlanParserTest(unittest.TestCase):
         self.assertLessEqual(len(window["events"][0]["description"]), 80)
         self.assertTrue(all(item["subject"] != "无关角色" for item in window["events"]))
 
+    def test_build_generation_memory_window_excludes_current_chapter_events(self):
+        events = [
+            EventEdge(
+                event_id="ev-prev",
+                subject="陈砚",
+                relation="encountered",
+                object="旧镜城守卫",
+                chapter=5,
+                confidence=0.95,
+                description="上一章在钟楼下短暂交锋。",
+            ),
+            EventEdge(
+                event_id="ev-current",
+                subject="陈砚",
+                relation="escaped",
+                object="旧镜城守卫",
+                chapter=6,
+                confidence=0.95,
+                description="本章旧稿里已经写过一次的逃脱动作。",
+            ),
+        ]
+
+        window = chapter_craft.build_generation_memory_window(
+            entities=[],
+            events=events,
+            chapter_number=6,
+            beats=["陈砚在旧镜城躲避守卫并处理伤势。"],
+        )
+
+        self.assertEqual([item["chapter"] for item in window["events"]], [5])
+
 
 if __name__ == "__main__":
     unittest.main()

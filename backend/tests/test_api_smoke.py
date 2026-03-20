@@ -158,7 +158,7 @@ class NovelistApiSmokeTest(unittest.TestCase):
 
     def test_build_one_shot_messages_include_structured_entities_and_events(self):
         project_id = self._create_project()
-        chapter_id = self._create_chapter(project_id)
+        chapter_id = self._create_chapter(project_id, chapter_number=2)
         chapter = chapters[chapter_id]
         chapter.plan = ChapterPlan(
             id=f"plan-{uuid4().hex[:8]}",
@@ -210,6 +210,7 @@ class NovelistApiSmokeTest(unittest.TestCase):
         self.assertEqual(len(payload["entities"][0]["constraints"]), 3)
         self.assertEqual(payload["events"][0]["subject"], "陈砚")
         self.assertEqual(payload["events"][0]["object"], "守卫")
+        self.assertEqual(payload["events"][0]["chapter"], 1)
         self.assertLessEqual(len(payload["events"][0]["description"]), 80)
 
     def test_graph_endpoints_sanitize_placeholder_role_names(self):
