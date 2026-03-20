@@ -43,6 +43,7 @@ export interface ChapterItem {
     status: string
     word_count: number
     conflict_count: number
+    has_persisted_content?: boolean
 }
 
 interface FetchOptions {

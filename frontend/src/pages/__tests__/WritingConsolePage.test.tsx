@@ -273,8 +273,10 @@ describe('WritingConsolePage', () => {
         expect(screen.getByText(/输入创作提示并点击/)).toBeTruthy()
     })
 
-    it('entry=first-chapter 且零章节时显示首章引导', async () => {
-        mockApiGet.mockResolvedValue({ data: [] })
+    it('entry=first-chapter 且仅有空壳章节时仍显示首章引导', async () => {
+        mockApiGet.mockResolvedValue({
+            data: [{ id: 'ch-1', chapter_number: 1, has_persisted_content: false }],
+        })
         renderPage('/project/proj-1/write?entry=first-chapter')
         await waitFor(() => {
             expect(screen.getByText('开始你的第一章')).toBeTruthy()
@@ -283,8 +285,10 @@ describe('WritingConsolePage', () => {
         expect(chapterCountInput.value).toBe('1')
     })
 
-    it('entry=first-chapter 但已有章节时不显示引导', async () => {
-        mockApiGet.mockResolvedValue({ data: [{ id: 'ch-1', chapter_number: 1 }] })
+    it('entry=first-chapter 且已有持久化正文时不显示首章引导', async () => {
+        mockApiGet.mockResolvedValue({
+            data: [{ id: 'ch-1', chapter_number: 1, has_persisted_content: true }],
+        })
         renderPage('/project/proj-1/write?entry=first-chapter')
         await waitFor(() => {
             expect(mockApiGet).toHaveBeenCalled()

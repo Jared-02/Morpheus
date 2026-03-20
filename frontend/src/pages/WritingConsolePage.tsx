@@ -311,7 +311,8 @@ export default function WritingConsolePage() {
         api.get(`/projects/${projectId}/chapters`)
             .then((res) => {
                 const list = Array.isArray(res.data) ? res.data : []
-                if (list.length === 0) {
+                const hasPersistedChapter = list.some((item) => Boolean(item?.has_persisted_content))
+                if (!hasPersistedChapter) {
                     setFirstChapterMode(true)
                     setForm((prev) => ({ ...prev, chapter_count: 1 }))
                     setChapterCountInput('1')
