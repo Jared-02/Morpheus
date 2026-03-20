@@ -2,6 +2,7 @@
 .kiro/
 .sisyphus/
 .claude/
+.worktrees/
 AGENT.md
 CLAUDE.md
 
