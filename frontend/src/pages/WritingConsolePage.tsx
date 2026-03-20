@@ -473,6 +473,7 @@ export default function WritingConsolePage() {
     function handleStart() {
         const currentForm = latestFormRef.current
         if (!projectId || generating) return
+        if (!currentForm.batch_direction.trim()) return
         if (hasInvalidAdvancedSettings(currentForm)) {
             reportInvalidAdvancedSettings()
             return
@@ -588,14 +589,17 @@ export default function WritingConsolePage() {
 
     /* ── "开始生成"按钮禁用状态 ── */
     const hasAdvValidationError = hasInvalidAdvancedSettings(form)
-    const startDisabled = !projectId || generating || hasAdvValidationError
+    const hasEmptyBatchDirection = !form.batch_direction.trim()
+    const startDisabled = !projectId || generating || hasAdvValidationError || hasEmptyBatchDirection
     const startDisabledReason = !projectId
         ? '缺少项目信息'
         : generating
             ? '正在生成中，请等待完成或停止当前任务'
             : hasAdvValidationError
                 ? '高级设置参数超出范围，请检查后重试'
-                : ''
+                : hasEmptyBatchDirection
+                    ? '请填写创作方向'
+                    : ''
 
     /* ── 阅读模式渲染 ── */
     if (readingMode) {

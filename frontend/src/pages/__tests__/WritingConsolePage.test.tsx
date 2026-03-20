@@ -194,14 +194,28 @@ describe('WritingConsolePage', () => {
         expect(screen.getAllByText(/模板/).length).toBeGreaterThan(0)
     })
 
-    it('batch_direction 为空时仍可点击开始生成', () => {
+    it('batch_direction 仅含空白时禁用开始生成并提示需要填写创作方向', () => {
         renderPage()
+        fireEvent.change(screen.getByPlaceholderText(/对这批章节的创作方向/), {
+            target: { value: '   ' },
+        })
         const btn = screen.getByText('开始生成')
-        expect(btn).toHaveProperty('disabled', false)
+        expect(btn).toHaveProperty('disabled', true)
+        fireEvent.mouseEnter(btn.parentElement as HTMLElement)
+        expect(screen.getByRole('tooltip').textContent).toContain('请填写创作方向')
+    })
+
+    it('batch_direction 为空时点击开始生成不会调用 start', () => {
+        renderPage()
+        fireEvent.click(screen.getByText('开始生成'))
+        expect(mockStart).not.toHaveBeenCalled()
     })
 
     it('点击开始生成时调用 start 并触发 Toast', () => {
         renderPage()
+        fireEvent.change(screen.getByPlaceholderText(/对这批章节的创作方向/), {
+            target: { value: '测试方向' },
+        })
         fireEvent.click(screen.getByText('开始生成'))
         expect(mockStart).toHaveBeenCalledTimes(1)
         expect(mockAddToast).toHaveBeenCalledWith('info', '开始生成，请稍候…')
