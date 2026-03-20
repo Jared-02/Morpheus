@@ -1135,7 +1135,7 @@ class NovelistApiSmokeTest(unittest.TestCase):
         batch_res = self.client.post(
             f"/api/projects/{project_id}/one-shot-book",
             json={
-                "prompt": "主角在雪夜被背叛后潜伏反击，最终揪出幕后主使。",
+                "batch_direction": "主角在雪夜被背叛后潜伏反击，最终揪出幕后主使。",
                 "mode": "quick",
                 "chapter_count": 3,
                 "words_per_chapter": 700,
@@ -1157,7 +1157,7 @@ class NovelistApiSmokeTest(unittest.TestCase):
         res = self.client.post(
             f"/api/projects/{project_id}/one-shot-book",
             json={
-                "prompt": "续写主线并留钩子。",
+                "batch_direction": "续写主线并留钩子。",
                 "mode": "quick",
                 "chapter_count": 1,
                 "words_per_chapter": 700,
@@ -1175,7 +1175,7 @@ class NovelistApiSmokeTest(unittest.TestCase):
             "POST",
             f"/api/projects/{project_id}/one-shot-book/stream",
             json={
-                "prompt": "主角在雪夜被背叛后潜伏反击，最终揪出幕后主使。",
+                "batch_direction": "主角在雪夜被背叛后潜伏反击，最终揪出幕后主使。",
                 "mode": "quick",
                 "chapter_count": 1,
                 "words_per_chapter": 700,
@@ -1558,6 +1558,24 @@ class NovelistApiSmokeTest(unittest.TestCase):
         forbidden = payload.get("forbidden_title_keywords") or []
         self.assertIn("阶段收束", forbidden)
         self.assertIn("第二阶段钩子", forbidden)
+
+    def test_build_outline_messages_include_scope_and_batch_direction(self):
+        project_id = self._create_project()
+        project = projects[project_id]
+
+        messages = build_outline_messages(
+            prompt="雪夜复仇",
+            chapter_count=4,
+            project=project,
+            identity="IDENTITY",
+            continuation_mode=False,
+            batch_direction="主角潜伏反击",
+            scope="volume",
+        )
+
+        payload = json.loads(messages[1]["content"])
+        self.assertEqual(payload["scope"], "volume")
+        self.assertIn("主角潜伏反击", messages[1]["content"])
 
     def test_build_fallback_outline_avoids_phase_template_titles(self):
         outline = build_fallback_outline(

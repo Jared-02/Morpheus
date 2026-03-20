@@ -14,7 +14,7 @@ import zipfile
 from enum import Enum
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Literal, Optional, Set, Tuple
 from uuid import uuid4, uuid5, NAMESPACE_URL
 
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File
@@ -22,7 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from starlette.background import BackgroundTask
 from starlette.middleware.trustedhost import TrustedHostMiddleware
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from agents.studio import AGENT_PROMPTS, AgentStudio, StudioWorkflow
@@ -1650,6 +1650,7 @@ def build_outline_messages(
     identity: str,
     continuation_mode: bool = False,
     batch_direction: Optional[str] = None,
+    scope: Optional[str] = None,
 ) -> List[Dict[str, str]]:
     phase_hints = build_outline_phase_hints(chapter_count, continuation_mode)
     constraints = [
@@ -1664,7 +1665,38 @@ def build_outline_messages(
     ]
     if continuation_mode:
         constraints.extend(build_serial_continuation_constraints())
-    result = [
+    payload = {
+        "task": "根据一句话梗概拆成章节蓝图",
+        "chapter_count": chapter_count,
+        "prompt": prompt,
+        "genre": project.genre,
+        "style": project.style,
+        "identity": identity,
+        "continuation_mode": continuation_mode,
+        "scope": scope,
+        "constraints": constraints,
+        "forbidden_title_keywords": [
+            "起势递进",
+            "代价扩张",
+            "阶段收束",
+            "里程碑",
+            "第二阶段钩子",
+        ],
+        "title_style_examples": [
+            "镜城残响",
+            "第二次心跳",
+            "车祸后的合法复活",
+            "监控者的真面目",
+            "在雪夜醒来的那个人",
+        ],
+        "phase_hints": phase_hints,
+    }
+    if batch_direction:
+        payload["batch_direction_guidance"] = (
+            f"用户对这批章节的创作方向要求：{batch_direction}。请在拆章和内容生成时参考此方向。"
+        )
+
+    return [
         {
             "role": "system",
             "content": (
@@ -1675,41 +1707,9 @@ def build_outline_messages(
         },
         {
             "role": "user",
-            "content": json.dumps(
-                {
-                    "task": "根据一句话梗概拆成章节蓝图",
-                    "chapter_count": chapter_count,
-                    "prompt": prompt,
-                    "genre": project.genre,
-                    "style": project.style,
-                    "identity": identity,
-                    "continuation_mode": continuation_mode,
-                    "constraints": constraints,
-                    "forbidden_title_keywords": [
-                        "起势递进",
-                        "代价扩张",
-                        "阶段收束",
-                        "里程碑",
-                        "第二阶段钩子",
-                    ],
-                    "title_style_examples": [
-                        "镜城残响",
-                        "第二次心跳",
-                        "车祸后的合法复活",
-                        "监控者的真面目",
-                        "在雪夜醒来的那个人",
-                    ],
-                    "phase_hints": phase_hints,
-                },
-                ensure_ascii=False,
-            ),
+            "content": json.dumps(payload, ensure_ascii=False),
         },
     ]
-    if batch_direction:
-        result[-1]["content"] += (
-            f"\n\n用户对这批章节的创作方向要求：{batch_direction}\n请在拆章和内容生成时参考此方向。"
-        )
-    return result
 
 
 def build_chapter_outline(
@@ -1723,6 +1723,7 @@ def build_chapter_outline(
     start_chapter_number: int = 1,
     existing_titles: Optional[List[str]] = None,
     batch_direction: Optional[str] = None,
+    scope: Optional[str] = None,
 ) -> List[Dict[str, str]]:
     identity = store.three_layer.get_identity()[:2500]
     messages = build_outline_messages(
@@ -1732,6 +1733,7 @@ def build_chapter_outline(
         identity=identity,
         continuation_mode=continuation_mode,
         batch_direction=batch_direction,
+        scope=scope,
     )
     raw = studio.llm_client.chat(
         messages,
@@ -2834,20 +2836,15 @@ class ChapterDirectionRequest(BaseModel):
 
 
 class OneShotBookRequest(BaseModel):
-    prompt: str = ""
-    batch_direction: Optional[str] = None
+    model_config = ConfigDict(extra="forbid")
+
+    batch_direction: str = Field(min_length=1)
     mode: GenerationMode = GenerationMode.STUDIO
     chapter_count: Optional[int] = Field(default=None, ge=1, le=60)
     words_per_chapter: int = Field(default=1600, ge=300, le=12000)
     auto_approve: bool = False
     continuation_mode: bool = False
-    scope: Optional[str] = None
-
-    @model_validator(mode="after")
-    def apply_batch_direction_alias(self):
-        if not self.prompt and self.batch_direction:
-            self.prompt = self.batch_direction
-        return self
+    scope: Optional[Literal["volume", "book"]] = None
 
 
 class PromptPreviewRequest(BaseModel):
@@ -4262,7 +4259,7 @@ async def run_one_shot_book_generation(
     )
     outline = await asyncio.to_thread(
         build_chapter_outline,
-        prompt=req.prompt.strip(),
+        prompt=req.batch_direction.strip(),
         chapter_count=chapter_count,
         project=project,
         store=store,
@@ -4271,6 +4268,7 @@ async def run_one_shot_book_generation(
         start_chapter_number=next_number,
         existing_titles=existing_titles,
         batch_direction=req.batch_direction,
+        scope=req.scope,
     )
     await emit_progress(
         progress,
@@ -4617,7 +4615,7 @@ async def run_one_shot_book_generation(
     response_payload = {
         "project_id": project_id,
         "mode": req.mode.value,
-        "prompt": req.prompt.strip(),
+        "prompt": req.batch_direction.strip(),
         "continuation_mode": req.continuation_mode,
         "generated_chapters": len(created),
         "chapters": created,
@@ -4633,9 +4631,9 @@ async def generate_one_shot_book(project_id: str, req: OneShotBookRequest):
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    prompt = req.prompt.strip()
-    if not prompt:
-        raise HTTPException(status_code=400, detail="prompt is required")
+    direction = req.batch_direction.strip()
+    if not direction:
+        raise HTTPException(status_code=400, detail="batch_direction is required")
 
     store = get_or_create_store(project_id)
     studio = get_or_create_studio(project_id)
@@ -4664,9 +4662,9 @@ async def generate_one_shot_book_stream(project_id: str, req: OneShotBookRequest
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    prompt = req.prompt.strip()
-    if not prompt:
-        raise HTTPException(status_code=400, detail="prompt is required")
+    direction = req.batch_direction.strip()
+    if not direction:
+        raise HTTPException(status_code=400, detail="batch_direction is required")
 
     store = get_or_create_store(project_id)
     studio = get_or_create_studio(project_id)

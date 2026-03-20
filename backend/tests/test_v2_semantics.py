@@ -103,11 +103,11 @@ class V2SemanticsTest(unittest.TestCase):
         )
         self.assertEqual(batch_res.status_code, 200)
 
-    def test_one_shot_book_ignores_unknown_start_chapter_number(self):
+    def test_one_shot_book_rejects_legacy_prompt_field(self):
         create_res = self.client.post(
             "/api/projects",
             json={
-                "name": f"旧起始章项目-{uuid4().hex[:8]}",
+                "name": f"旧prompt项目-{uuid4().hex[:8]}",
                 "genre": "奇幻",
                 "style": "冷峻",
                 "target_length": 300000,
@@ -120,14 +120,39 @@ class V2SemanticsTest(unittest.TestCase):
         batch_res = self.client.post(
             f"/api/projects/{project_id}/one-shot-book",
             json={
-                "batch_direction": "测试未知字段被忽略。",
+                "prompt": "旧字段",
+                "mode": "quick",
+                "chapter_count": 1,
+                "words_per_chapter": 700,
+            },
+        )
+        self.assertEqual(batch_res.status_code, 422)
+
+    def test_one_shot_book_rejects_unknown_fields(self):
+        create_res = self.client.post(
+            "/api/projects",
+            json={
+                "name": f"未知字段项目-{uuid4().hex[:8]}",
+                "genre": "奇幻",
+                "style": "冷峻",
+                "target_length": 300000,
+                "taboo_constraints": [],
+            },
+        )
+        self.assertEqual(create_res.status_code, 200)
+        project_id = create_res.json()["id"]
+
+        batch_res = self.client.post(
+            f"/api/projects/{project_id}/one-shot-book",
+            json={
+                "batch_direction": "测试未知字段被拒绝。",
                 "mode": "quick",
                 "chapter_count": 1,
                 "words_per_chapter": 700,
                 "start_chapter_number": 99,
             },
         )
-        self.assertEqual(batch_res.status_code, 200)
+        self.assertEqual(batch_res.status_code, 422)
 
 
 if __name__ == "__main__":
