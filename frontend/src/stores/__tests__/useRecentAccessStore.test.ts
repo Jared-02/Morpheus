@@ -110,6 +110,20 @@ describe('useRecentAccessStore', () => {
         expect(localStorage.removeItem).toHaveBeenCalledWith(STORAGE_KEY)
     })
 
+    it('removeChapter removes only the matching chapter entry', () => {
+        const store = useRecentAccessStore.getState()
+        store.addAccess({ type: 'project', id: 'p1', name: 'P1', path: '/p1' })
+        store.addAccess({ type: 'chapter', id: 'c1', name: 'C1', path: '/project/p1/chapter/c1', projectId: 'p1' })
+        store.addAccess({ type: 'chapter', id: 'c2', name: 'C2', path: '/project/p1/chapter/c2', projectId: 'p1' })
+
+        store.removeChapter('c1')
+
+        const { items } = useRecentAccessStore.getState()
+        expect(items.find((item) => item.type === 'chapter' && item.id === 'c1')).toBeUndefined()
+        expect(items.find((item) => item.type === 'chapter' && item.id === 'c2')).toBeTruthy()
+        expect(items.find((item) => item.type === 'project' && item.id === 'p1')).toBeTruthy()
+    })
+
     it('items are ordered by timestamp descending (most recent first)', () => {
         const store = useRecentAccessStore.getState()
         store.addAccess({ type: 'project', id: 'p1', name: 'P1', path: '/p1' })
