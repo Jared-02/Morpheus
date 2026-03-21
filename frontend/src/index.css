@@ -2139,8 +2139,6 @@ pre {
 .advanced-box,
 .toast,
 .shortcut-panel,
-.mb-search-panel,
-.mb-files-panel,
 .mb-stats-bar,
 .mb-identity-panel,
 .disabled-tooltip {
@@ -3518,6 +3516,18 @@ tbody tr:hover {
   }
 }
 
+.mb-panel-shell {
+  min-width: 0;
+  overflow: hidden;
+  padding: 14px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  background: var(--glass);
+  box-shadow: var(--shadow-sm);
+  color: var(--text-primary);
+  backdrop-filter: blur(20px);
+}
+
 /* ── Section Heads ── */
 
 .mb-section-head {
@@ -3539,11 +3549,6 @@ tbody tr:hover {
 }
 
 /* ── Search Panel ── */
-
-.mb-search-panel {
-  min-width: 0;
-  overflow: hidden;
-}
 
 .mb-search-bar {
   display: flex;
@@ -3645,11 +3650,6 @@ tbody tr:hover {
 }
 
 /* ── Files Panel ── */
-
-.mb-files-panel {
-  min-width: 0;
-  overflow: hidden;
-}
 
 .mb-layer-filters {
   display: flex;

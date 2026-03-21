@@ -127,6 +127,16 @@ describe('MemoryBrowserPage', () => {
         })
     })
 
+    it('applies shared panel shell styling hooks to browse view panels', async () => {
+        renderPage()
+        await waitFor(() => {
+            expect(screen.getByText('语义搜索')).toBeInTheDocument()
+            expect(screen.getByText('记忆文件')).toBeInTheDocument()
+        })
+        expect(document.querySelector('.mb-search-panel')).toHaveClass('mb-panel-shell')
+        expect(document.querySelector('.mb-files-panel')).toHaveClass('mb-panel-shell')
+    })
+
     it('loads identity and memory files on mount', async () => {
         renderPage()
         await waitFor(() => {
