@@ -128,6 +128,7 @@ const mockFetchChapters = vi.fn()
 const mockFetchProject = vi.fn()
 const mockInvalidateCache = vi.fn()
 const mockAddAccess = vi.fn()
+const mockRemoveChapterAccess = vi.fn()
 let mockCurrentProject = { id: 'proj-1', name: '霜城编年史' as string, fanqie_book_id: '' as string }
 const mockStoreChapters = [
     { id: 'ch-1', chapter_number: 1, title: '雪夜惊变', goal: '', status: 'draft', word_count: 18, conflict_count: 1 },
@@ -149,6 +150,7 @@ vi.mock('../../stores/useRecentAccessStore', () => ({
     useRecentAccessStore: (selector: (s: any) => any) =>
         selector({
             addAccess: mockAddAccess,
+            removeChapter: mockRemoveChapterAccess,
         }),
 }))
 
@@ -821,6 +823,17 @@ describe('ChapterWorkbenchPage', () => {
         })
     })
 
+    it('章节不存在时会清理最近访问并返回章节列表页', async () => {
+        mockApiGet.mockRejectedValue({ response: { status: 404, data: { detail: 'Chapter not found' } } })
+        renderPage()
+
+        await waitFor(() => {
+            expect(mockRemoveChapterAccess).toHaveBeenCalledWith('ch-1')
+        })
+        expect(mockAddToast).toHaveBeenCalledWith('warning', '该章节已不存在，已从最近访问中移除')
+        expect(screen.getByText('项目详情页')).toBeTruthy()
+    })
+
     it('重新生成蓝图成功时触发 success Toast', async () => {
         mockApiPost.mockResolvedValue({ data: {} })
         renderPage()
@@ -1064,6 +1077,21 @@ describe('ChapterWorkbenchPage', () => {
         })
 
         expect(screen.queryByText('删除并重建同编号')).toBeNull()
+    })
+
+    it('删除本章成功时会清理最近访问中的当前章节', async () => {
+        renderPage()
+        await waitFor(() => {
+            expect(screen.getByText('删除本章')).toBeTruthy()
+        })
+
+        fireEvent.click(screen.getByText('删除本章'))
+        fireEvent.click(screen.getByText('确认删除'))
+
+        await waitFor(() => {
+            expect(mockApiDelete).toHaveBeenCalledWith('/chapters/ch-1')
+        })
+        expect(mockRemoveChapterAccess).toHaveBeenCalledWith('ch-1')
     })
 
     it('存在后续章节时显示重做本章衔接风险提示', async () => {

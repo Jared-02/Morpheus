@@ -348,6 +348,7 @@ export default function ChapterWorkbenchPage() {
     const addToast = useToastStore((s) => s.addToast)
     const addRecord = useActivityStore((s) => s.addRecord)
     const addAccess = useRecentAccessStore((s) => s.addAccess)
+    const removeChapter = useRecentAccessStore((s) => s.removeChapter)
     const readingMode = useUIStore((s) => s.readingMode)
     const enterReadingMode = useUIStore((s) => s.enterReadingMode)
     const exitReadingMode = useUIStore((s) => s.exitReadingMode)
@@ -422,10 +423,18 @@ export default function ChapterWorkbenchPage() {
             setLoading(false)
         } catch (err: any) {
             console.error(err)
-            addToast('error', '加载章节失败，请稍后重试')
+            if (err?.response?.status === 404) {
+                removeChapter(chapterId)
+                addToast('warning', '该章节已不存在，已从最近访问中移除')
+                if (projectId) {
+                    navigate(`/project/${projectId}`)
+                }
+            } else {
+                addToast('error', '加载章节失败，请稍后重试')
+            }
             setLoading(false)
         }
-    }, [chapterId, addToast])
+    }, [chapterId, projectId, addToast, navigate, removeChapter])
 
     /* ── 无 chapterId 时加载章节列表 ── */
     useEffect(() => {
@@ -1100,6 +1109,7 @@ export default function ChapterWorkbenchPage() {
         }
         try {
             await deleteChapterRequest(chapterId)
+            removeChapter(chapterId)
             if (projectId) {
                 invalidateCache('project', projectId)
                 invalidateCache('chapters', projectId)
