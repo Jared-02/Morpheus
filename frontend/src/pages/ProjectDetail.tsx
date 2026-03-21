@@ -27,6 +27,7 @@ export default function ProjectDetail() {
   const addToast = useToastStore((s) => s.addToast)
   const addRecord = useActivityStore((s) => s.addRecord)
   const addAccess = useRecentAccessStore((s) => s.addAccess)
+  const removeChapter = useRecentAccessStore((s) => s.removeChapter)
 
   const [showModal, setShowModal] = useState(false)
   const [creating, setCreating] = useState(false)
@@ -258,6 +259,7 @@ export default function ProjectDetail() {
           throw error
         }
       }
+      removeChapter(chapter.id)
       addToast('success', `已删除第 ${chapter.chapter_number} 章`)
       addRecord({ type: 'delete', description: `删除章节: ${chapter.title}`, status: 'success' })
       invalidateCache('chapters', projectId)
@@ -295,6 +297,7 @@ export default function ProjectDetail() {
           }
         }
         deletedCount++
+        removeChapter(chapterId)
       } catch {
         failedCount++
       }

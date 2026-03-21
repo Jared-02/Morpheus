@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import ProjectDetail from '../ProjectDetail'
 import { useProjectStore } from '../../stores/useProjectStore'
 import { useToastStore } from '../../stores/useToastStore'
+import { useRecentAccessStore } from '../../stores/useRecentAccessStore'
 
 const mockApiPost = vi.fn()
 const mockApiDelete = vi.fn()
@@ -68,6 +69,7 @@ beforeEach(() => {
     mockApiDelete.mockReset()
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     useToastStore.setState({ toasts: [] })
+    useRecentAccessStore.setState({ items: [] })
     useProjectStore.setState({
         projects: [],
         currentProject: null,
@@ -253,6 +255,40 @@ describe('ProjectDetailPage', () => {
         expect(invalidateCache).toHaveBeenCalledWith('project', 'p1')
         expect(fetchProject).toHaveBeenCalledWith('p1', { force: true })
         expect(fetchChapters).toHaveBeenCalledWith('p1', { force: true })
+    })
+
+    it('clicking 删除 also removes the deleted chapter from recent access', async () => {
+        const fetchProject = vi.fn()
+        const fetchChapters = vi.fn()
+        const invalidateCache = vi.fn()
+        mockApiDelete.mockResolvedValue({ data: { status: 'deleted' } })
+        useRecentAccessStore.setState({
+            items: [
+                { type: 'project', id: 'p1', name: '霜城编年史', path: '/project/p1', timestamp: 1 },
+                { type: 'chapter', id: 'c1', name: '第一章', path: '/project/p1/chapter/c1', timestamp: 2, projectId: 'p1' },
+                { type: 'chapter', id: 'c2', name: '第二章', path: '/project/p1/chapter/c2', timestamp: 3, projectId: 'p1' },
+            ],
+        })
+        useProjectStore.setState({
+            currentProject: sampleProject,
+            chapters: sampleChapters,
+            loading: false,
+            fetchProject,
+            fetchChapters,
+            invalidateCache,
+        } as any)
+
+        renderPage()
+        fireEvent.click(screen.getAllByText('删除')[0])
+
+        await waitFor(() => {
+            expect(mockApiDelete).toHaveBeenCalledWith('/chapters/c1')
+        })
+
+        const items = useRecentAccessStore.getState().items
+        expect(items.find((item) => item.type === 'chapter' && item.id === 'c1')).toBeUndefined()
+        expect(items.find((item) => item.type === 'chapter' && item.id === 'c2')).toBeTruthy()
+        expect(items.find((item) => item.type === 'project' && item.id === 'p1')).toBeTruthy()
     })
 
     describe('chapter creation modal field validation', () => {
