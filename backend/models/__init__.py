@@ -115,6 +115,14 @@ class Project(BaseModel):
     updated_at: datetime = Field(default_factory=datetime.now)
 
 
+class CharacterDecision(BaseModel):
+    character: str = Field(min_length=1)
+    beat_index: int = Field(ge=0)
+    choice: str = Field(min_length=1)
+    cost: str = ""
+    rejected_alternative: str = ""
+
+
 class ChapterPlan(BaseModel):
     id: str
     chapter_id: int
@@ -125,6 +133,7 @@ class ChapterPlan(BaseModel):
     foreshadowing: List[str] = Field(default_factory=list)
     callback_targets: List[str] = Field(default_factory=list)
     role_goals: Dict[str, str] = Field(default_factory=dict)
+    character_decisions: List[CharacterDecision] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=datetime.now)
 
 

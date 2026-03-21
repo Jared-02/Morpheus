@@ -12,7 +12,7 @@ from datetime import datetime
 from uuid import uuid4
 from enum import Enum
 
-from models import AgentRole, AgentDecision, AgentTrace, ChapterPlan, Chapter
+from models import AgentRole, AgentDecision, AgentTrace, ChapterPlan, Chapter, CharacterDecision
 from core.llm_client import create_llm_client
 from core.chapter_craft import (
     build_micro_arc_hint,
@@ -542,6 +542,7 @@ class StudioWorkflow:
             foreshadowing=parsed_plan["foreshadowing"],
             callback_targets=parsed_plan["callback_targets"],
             role_goals=parsed_plan["role_goals"],
+            character_decisions=parsed_plan["character_decisions"],
         )
 
         decision = director.decide(ctx, [r["item_id"] for r in search_results[:5]])
@@ -1305,6 +1306,9 @@ class StudioWorkflow:
                 "foreshadowing": self._normalize_list(payload.get("foreshadowing")),
                 "callback_targets": self._normalize_list(payload.get("callback_targets")),
                 "role_goals": self._normalize_role_goals(payload.get("role_goals")),
+                "character_decisions": self._normalize_character_decisions(
+                    payload.get("character_decisions")
+                ),
             }
             source = "json_object"
         else:
@@ -1333,6 +1337,7 @@ class StudioWorkflow:
                 "foreshadowing": foreshadowing,
                 "callback_targets": callback_targets,
                 "role_goals": role_goals,
+                "character_decisions": [],
             }
 
             has_section_values = any(
@@ -1407,6 +1412,21 @@ class StudioWorkflow:
                     normalized.append(text)
             return normalized
         return []
+
+    def _normalize_character_decisions(self, value: Any) -> List[Dict[str, Any]]:
+        if not isinstance(value, list):
+            return []
+
+        normalized: List[Dict[str, Any]] = []
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            try:
+                decision = CharacterDecision.model_validate(item)
+            except Exception:
+                continue
+            normalized.append(decision.model_dump())
+        return normalized
 
     def _sanitize_draft(self, draft: str, chapter: Chapter, plan: ChapterPlan) -> str:
         content = (draft or "").strip()

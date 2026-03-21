@@ -121,7 +121,7 @@ class StudioPlanParserTest(unittest.TestCase):
         self.assertGreaterEqual(quality.get("template_phrase_hits", 0), 2)
         self.assertTrue(any("模板化" in item for item in quality.get("issues", [])))
 
-    def test_extract_plan_payload_ignores_half_wired_character_decisions(self):
+    def test_extract_plan_payload_accepts_character_decisions_json(self):
         workflow = self._workflow()
         chapter = self._chapter()
         text = json.dumps(
@@ -141,10 +141,44 @@ class StudioPlanParserTest(unittest.TestCase):
 
         parsed = workflow._extract_plan_payload(text, chapter)
 
-        self.assertNotIn("character_decisions", parsed)
+        self.assertEqual(
+            parsed["character_decisions"],
+            [
+                {
+                    "character": "陈砚",
+                    "beat_index": 0,
+                    "choice": "断开主链路",
+                    "cost": "",
+                    "rejected_alternative": "",
+                }
+            ],
+        )
         self.assertEqual(parsed["role_goals"].get("陈砚"), "拿到真实入口坐标。")
 
-    def test_chapter_plan_model_ignores_character_decisions_extra(self):
+    def test_extract_plan_payload_drops_malformed_character_decisions(self):
+        workflow = self._workflow()
+        chapter = self._chapter()
+        malformed_text = json.dumps(
+            {
+                "title": chapter.title,
+                "beats": ["陈砚潜入旧镜城节点并切断追踪锚点。"],
+                "conflicts": ["外部：守卫逼近。"],
+                "character_decisions": [
+                    {"character": "陈砚", "choice": "断开主链路"},
+                    {"character": "", "beat_index": 0, "choice": "断开主链路"},
+                    "断开主链路",
+                ],
+            },
+            ensure_ascii=False,
+        )
+
+        parsed = workflow._extract_plan_payload(malformed_text, chapter)
+        markdown_parsed = workflow._extract_plan_payload("节拍\n1. 陈砚切断追踪锚点。", chapter)
+
+        self.assertEqual(parsed["character_decisions"], [])
+        self.assertEqual(markdown_parsed["character_decisions"], [])
+
+    def test_chapter_plan_model_accepts_and_dumps_character_decisions(self):
         plan = ChapterPlan.model_validate(
             {
                 "id": "plan-1",
@@ -153,12 +187,29 @@ class StudioPlanParserTest(unittest.TestCase):
                 "goal": "定位初始密钥",
                 "beats": ["陈砚切断追踪锚点。"],
                 "character_decisions": [
-                    {"character": "陈砚", "beat_index": 0, "choice": "断开主链路"}
+                    {
+                        "character": "陈砚",
+                        "beat_index": 0,
+                        "choice": "断开主链路",
+                        "cost": "暴露伤势",
+                        "rejected_alternative": "继续潜伏",
+                    }
                 ],
             }
         )
 
-        self.assertNotIn("character_decisions", plan.model_dump())
+        self.assertEqual(
+            plan.model_dump()["character_decisions"],
+            [
+                {
+                    "character": "陈砚",
+                    "beat_index": 0,
+                    "choice": "断开主链路",
+                    "cost": "暴露伤势",
+                    "rejected_alternative": "继续潜伏",
+                }
+            ],
+        )
 
     def test_generate_draft_quality_uses_actual_target_words(self):
         chapter = self._chapter()
