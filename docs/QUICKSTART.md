@@ -19,7 +19,7 @@ npm install
 
 复制 `.env.example` 为 `.env` 并填写配置：
 
-### 使用 DeepSeek (流式友好)
+### 默认示例：DeepSeek（也支持 OpenAI-compatible 提供商）
 
 ```bash
 # .env 配置
@@ -54,6 +54,12 @@ API_WORKERS=2 ./scripts/run_api.sh
 npm run dev
 ```
 
+> 注意：前端默认代理目标是 `http://localhost:8001`。如果你的后端跑在 `8000`，请显式启动：
+>
+> ```bash
+> VITE_API_PROXY_TARGET=http://localhost:8000 npm run dev
+> ```
+
 可选日志配置（`backend/.env`）：
 
 ```bash
@@ -77,13 +83,13 @@ curl http://127.0.0.1:8000/api/runtime/llm
 - `remote_ready: true`
 - `effective_provider` 与你期望的一致
 
-## 6. 使用流程（新版单工作台）
+## 6. 使用流程（当前多页面工作流）
 
-1. **选择项目** - 顶部下拉直接切换，或点“新建项目”即时创建。
-2. **一句话输入** - 在页面底部输入小说核心冲突与目标。
-3. **点“开始生成”** - 默认即可跑通，模式/范围可用芯片快速切换。
-4. **看中间正文流** - Markdown 正文在主区域持续更新，章节开始即有占位提示。
-5. **右侧查看状态** - “任务”页看章节结果和日志，“记忆”页维护 L1，“调试”页看 Prompt 约束。
+1. **创建或进入项目** - 在项目列表页创建项目，填写题材、文风、梗概与禁忌约束。
+2. **进入创作控制台** - 在 `/project/:projectId/write` 页面填写“创作方向（batch direction）”。
+3. **点“开始生成”** - 选择模式、章节数、每章字数与自动审批后启动批量生成。
+4. **查看流式结果** - 创作控制台会持续显示章节正文、日志与统计信息。
+5. **进入章节工作台精修** - 在 `/project/:projectId/chapter/:chapterId` 查看蓝图、冲突与草稿，并按“修改方向”重做单章。
 
 ## 7. 调试接口（推荐）
 
@@ -107,8 +113,9 @@ curl -X POST "http://127.0.0.1:8000/api/projects/<project_id>/prompt-preview" \
 ### Embedding
 - `deepseek-embedding` - DeepSeek 嵌入模型 (1536维)
 
-### DeepSeek
-- `deepseek-chat`
+### LLM Provider 示例
+- `deepseek-chat`（DeepSeek 默认示例路径）
+- 也可切换到 OpenAI-compatible 提供商（按对应 provider 环境变量配置）
 
 ## 故障排除
 
@@ -118,8 +125,8 @@ curl -X POST "http://127.0.0.1:8000/api/projects/<project_id>/prompt-preview" \
 - 查看日志中的具体错误信息
 
 ### Embedding 服务报错
-- 确保 `EMBEDDING_MODEL` 与 provider 匹配
-- DeepSeek 使用 `deepseek-embedding`
+- 确保 `EMBEDDING_MODEL` 与当前 provider/运行时路径匹配
+- DeepSeek 示例路径使用 `deepseek-embedding`
 - 本地优先模式下保持 `REMOTE_EMBEDDING_ENABLED=false` 可获得更稳定速度
 
 ### 前端无法连接后端

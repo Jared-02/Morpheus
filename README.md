@@ -114,6 +114,7 @@ VITE_API_PROXY_TARGET=http://localhost:8000 npm run dev
 
 ### 3. 章节工作台（逐章修改）
 - 查看蓝图、冲突、草稿与多通道流式输出（导演 / 设定 / 润色 / 终稿）
+- 章节蓝图后端结构已支持 `role_goals` 与 `character_decisions` 等字段解析，避免结构化计划在解析阶段被静默丢弃
 - 支持正文手工编辑与保存
 - 支持填写“修改方向”，重新生成蓝图或重做本章
 - 当后续章节已存在时，会提醒重做本章可能导致上下文不一致
@@ -312,7 +313,7 @@ python -m mypy .
 
 ### 整书 / 批量生成
 - `POST /api/projects/{id}/one-shot-book`
-- `GET /api/projects/{id}/one-shot-book/stream`
+- `POST /api/projects/{id}/one-shot-book/stream`
 
 ### 章节
 - `GET /api/chapters/{id}`
