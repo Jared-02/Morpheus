@@ -14,7 +14,7 @@ class TestL4FeatureFlags(unittest.TestCase):
         try:
             from api.main import Settings
 
-            return Settings()
+            return Settings(_env_file=None)
         finally:
             for k in keys:
                 os.environ.pop(k, None)
