@@ -81,6 +81,7 @@ class Settings(BaseSettings):
     llm_provider: str = "minimax"
     remote_llm_enabled: bool = False
     openai_api_key: Optional[str] = None
+    openai_base_url: str = "https://api.openai.com/v1"
     openai_model: str = "gpt-4-turbo-preview"
     minimax_api_key: Optional[str] = None
     minimax_model: str = "MiniMax-M2.5"
@@ -309,7 +310,7 @@ def resolve_llm_runtime() -> Dict[str, Any]:
     else:
         provider_key = openai_key
         effective_model = settings.openai_model
-        effective_base_url = "https://api.openai.com/v1"
+        effective_base_url = settings.openai_base_url
 
     remote_ready = remote_effective and bool(provider_key)
     return {

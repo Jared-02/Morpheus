@@ -7,6 +7,7 @@ import re
 import logging
 from pathlib import Path
 from datetime import datetime, timezone
+from unittest.mock import patch
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
@@ -33,6 +34,7 @@ from api.main import (
     chapters,
     data_root,
     BACKEND_ROOT,
+    resolve_llm_runtime,
     resolve_target_word_upper_bound,
     save_chapter,
     settings,
@@ -1298,6 +1300,21 @@ class NovelistApiSmokeTest(unittest.TestCase):
             "has_deepseek_key",
         ):
             self.assertIn(field, payload)
+
+    def test_resolve_llm_runtime_uses_custom_openai_base_url(self):
+        custom_base_url = "https://gateway.example.test/v1"
+        with (
+            patch.object(settings, "llm_provider", "openai"),
+            patch.object(settings, "remote_llm_enabled", True),
+            patch.object(settings, "openai_api_key", "test-openai-key"),
+            patch.object(settings, "openai_model", "gpt-5.4"),
+            patch.object(settings, "openai_base_url", custom_base_url),
+        ):
+            runtime = resolve_llm_runtime()
+
+        self.assertEqual(runtime["effective_provider"], "openai")
+        self.assertEqual(runtime["effective_model"], "gpt-5.4")
+        self.assertEqual(runtime["effective_base_url"], custom_base_url)
 
     def test_prompt_preview_endpoint(self):
         project_id = self._create_project()
