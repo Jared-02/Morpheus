@@ -84,7 +84,7 @@ VITE_API_PROXY_TARGET=http://localhost:8000 npm run dev
 **后端**
 - FastAPI + Pydantic 2 + Uvicorn
 - SQLite + LanceDB
-- DeepSeek（唯一运行时 LLM）
+- DeepSeek（默认提供商）+ OpenAI-compatible 提供商支持
 - SSE（Server-Sent Events）
 
 ## 当前产品能力
@@ -131,7 +131,7 @@ VITE_API_PROXY_TARGET=http://localhost:8000 npm run dev
 
 ### 5. 知识图谱
 - 图谱不是独立于记忆的“第四层主架构”，而是建立在 L4 角色档案、图节点覆盖层与审计日志之上的独立子系统
-- 但它受 `VITE_GRAPH_FEATURE_ENABLED` 开关控制；关闭时页面会直接显示“功能已暂时关闭”
+- 前后端默认均开启，但仍受 feature flag 控制；可通过 `GRAPH_FEATURE_ENABLED` / `VITE_GRAPH_FEATURE_ENABLED` 关闭，关闭时前端会显示“功能已暂时关闭”
 
 相关代码：
 - `frontend/src/pages/KnowledgeGraphPage.tsx`
@@ -156,7 +156,7 @@ VITE_API_PROXY_TARGET=http://localhost:8000 npm run dev
 │                 REST API · SSE Streaming · Import / Export                  │
 ├───────────────────────────────┬──────────────────────────────────────────────┤
 │ Multi-Agent Orchestration     │ Review / Consistency / Metrics / Trace      │
-│ Agent Studio · DeepSeek       │ 审阅动作 · 冲突规则 · 轨迹回放 · 项目指标         │
+│ Agent Studio · LLM Runtime    │ 审阅动作 · 冲突规则 · 轨迹回放 · 项目指标         │
 ├───────────────────────────────┼──────────────────────────────────────────────┤
 │ Context Assembly / Writeback  │ Memory & Retrieval Core                      │
 │ Context Pack · Chapter Writeback│ L1/L2/L3 文件记忆 · SQLite 索引 · LanceDB   │
@@ -167,7 +167,7 @@ VITE_API_PROXY_TARGET=http://localhost:8000 npm run dev
 ```
 
 **运行时特点**
-- 单 LLM：DeepSeek
+- DeepSeek 为默认提供商，运行时同时支持 OpenAI-compatible 提供商
 - API Key 缺失时自动降级到本地 fallback
 - 章节与整书生成通过 SSE 推送进度和正文片段
 - 推荐 `API_WORKERS=2+`，避免长生成阻塞读接口
@@ -184,7 +184,7 @@ VITE_API_PROXY_TARGET=http://localhost:8000 npm run dev
 
 #### 3. 多 Agent 编排层
 - `backend/agents/studio.py` 负责导演 / 设定 / 连续性 / 文风 / 裁决等角色编排
-- DeepSeek 作为当前唯一运行时模型，由 `backend/core/llm_client.py` 提供统一入口
+- `backend/core/llm_client.py` 提供统一入口；默认路径为 DeepSeek，同时支持 OpenAI-compatible 提供商
 
 #### 4. 上下文装配与回写层
 - `backend/services/memory_context.py` 负责构建 generation context pack
@@ -332,7 +332,7 @@ python -m mypy .
 
 - 提交风格以 `feat(...)` / `fix(...)` / `refactor(...)` / `chore(...)` 为主
 - UI 文案以中文为主
-- 运行时 LLM 固定为 DeepSeek
+- 默认运行时提供商为 DeepSeek，也支持 OpenAI-compatible 提供商
 - 数据目录 `data/` 为运行时产物，不进 git
 
 ## 相关文档
