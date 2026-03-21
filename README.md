@@ -84,7 +84,7 @@ VITE_API_PROXY_TARGET=http://localhost:8000 npm run dev
 **后端**
 - FastAPI + Pydantic 2 + Uvicorn
 - SQLite + LanceDB
-- DeepSeek（默认提供商）+ OpenAI-compatible 提供商支持
+- README 与 `.env.example` 默认配置路径使用 DeepSeek，同时支持 OpenAI-compatible 提供商
 - SSE（Server-Sent Events）
 
 ## 当前产品能力
@@ -167,7 +167,7 @@ VITE_API_PROXY_TARGET=http://localhost:8000 npm run dev
 ```
 
 **运行时特点**
-- DeepSeek 为默认提供商，运行时同时支持 OpenAI-compatible 提供商
+- 按当前 README 与 `.env.example` 示例配置，DeepSeek 是默认 provider 路径；如需切换，运行时支持 OpenAI-compatible 提供商
 - API Key 缺失时自动降级到本地 fallback
 - 章节与整书生成通过 SSE 推送进度和正文片段
 - 推荐 `API_WORKERS=2+`，避免长生成阻塞读接口
@@ -184,7 +184,7 @@ VITE_API_PROXY_TARGET=http://localhost:8000 npm run dev
 
 #### 3. 多 Agent 编排层
 - `backend/agents/studio.py` 负责导演 / 设定 / 连续性 / 文风 / 裁决等角色编排
-- `backend/core/llm_client.py` 提供统一入口；默认路径为 DeepSeek，同时支持 OpenAI-compatible 提供商
+- `backend/core/llm_client.py` 提供统一入口；按当前 README 与 `.env.example` 示例配置，默认路径使用 DeepSeek，同时支持 OpenAI-compatible 提供商
 
 #### 4. 上下文装配与回写层
 - `backend/services/memory_context.py` 负责构建 generation context pack
@@ -247,6 +247,7 @@ DEEPSEEK_MODEL=deepseek-chat
 API_WORKERS=2
 LOG_LEVEL=info
 GRAPH_FEATURE_ENABLED=true
+VITE_GRAPH_FEATURE_ENABLED=true
 L4_PROFILE_ENABLED=true
 ```
 
@@ -332,7 +333,7 @@ python -m mypy .
 
 - 提交风格以 `feat(...)` / `fix(...)` / `refactor(...)` / `chore(...)` 为主
 - UI 文案以中文为主
-- 默认运行时提供商为 DeepSeek，也支持 OpenAI-compatible 提供商
+- README 与 `.env.example` 默认配置路径使用 DeepSeek；如需切换，可改用 OpenAI-compatible 提供商
 - 数据目录 `data/` 为运行时产物，不进 git
 
 ## 相关文档
