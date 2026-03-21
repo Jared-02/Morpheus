@@ -102,7 +102,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     enable_http_logging: bool = True
     log_file: Optional[str] = None
-    graph_feature_enabled: bool = False
+    graph_feature_enabled: bool = True
     l4_profile_enabled: bool = True
     l4_auto_extract_enabled: bool = True
     cors_allow_origins: str = "*"

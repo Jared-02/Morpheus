@@ -7,7 +7,7 @@ import unittest
 class TestL4FeatureFlags(unittest.TestCase):
     def _make_settings(self, **env_overrides):
         """Create a fresh Settings instance with optional env overrides."""
-        keys = ["L4_PROFILE_ENABLED", "L4_AUTO_EXTRACT_ENABLED"]
+        keys = ["GRAPH_FEATURE_ENABLED", "L4_PROFILE_ENABLED", "L4_AUTO_EXTRACT_ENABLED"]
         saved = {k: os.environ.pop(k, None) for k in keys}
         for k, v in env_overrides.items():
             os.environ[k] = v
@@ -22,6 +22,10 @@ class TestL4FeatureFlags(unittest.TestCase):
                 if v is not None:
                     os.environ[k] = v
 
+    def test_graph_feature_enabled_default_true(self):
+        s = self._make_settings()
+        self.assertTrue(s.graph_feature_enabled)
+
     def test_l4_profile_enabled_default_true(self):
         s = self._make_settings()
         self.assertTrue(s.l4_profile_enabled)
@@ -29,6 +33,10 @@ class TestL4FeatureFlags(unittest.TestCase):
     def test_l4_auto_extract_enabled_default_true(self):
         s = self._make_settings()
         self.assertTrue(s.l4_auto_extract_enabled)
+
+    def test_graph_feature_disabled_via_env(self):
+        s = self._make_settings(GRAPH_FEATURE_ENABLED="false")
+        self.assertFalse(s.graph_feature_enabled)
 
     def test_l4_profile_disabled_via_env(self):
         s = self._make_settings(L4_PROFILE_ENABLED="false")
