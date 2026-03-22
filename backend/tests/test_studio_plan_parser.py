@@ -1,21 +1,22 @@
 import asyncio
 import json
 import os
-import types
 import unittest
+from typing import cast
 from unittest.mock import patch
 
-from agents.studio import StudioWorkflow
+from agents.studio import Agent, AgentStudio, StudioWorkflow
 from core import chapter_craft
 from core.chapter_craft import build_locked_facts, build_setter_constraints
-from models import AgentRole, Chapter, ChapterPlan, EntityState, EventEdge
+from models import AgentDecision, AgentRole, Chapter, ChapterPlan, EntityState, EventEdge
 
 
-class _ScriptedAgent:
-    def __init__(self, responses):
+class _ScriptedAgent(Agent):
+    def __init__(self, responses, *, role: AgentRole = AgentRole.DIRECTOR):
+        super().__init__(role=role, name="stub", description="stub", system_prompt="")
         self._responses = list(responses)
 
-    async def think(self, _context):
+    async def think(self, context):
         if not self._responses:
             raise AssertionError("unexpected think call")
         response = self._responses.pop(0)
@@ -23,8 +24,15 @@ class _ScriptedAgent:
             raise response
         return response
 
-    def decide(self, _context, _input_refs):
-        return types.SimpleNamespace(decision_text="", reasoning="")
+    def decide(self, context, input_refs):
+        return AgentDecision(
+            id="decision-stub",
+            agent_role=self.role,
+            chapter_id=0,
+            input_refs=input_refs,
+            decision_text="",
+            reasoning="",
+        )
 
 
 class _FakeStudio:
@@ -37,10 +45,10 @@ class _FakeStudio:
     def get_agent(self, role):
         return self._agents[role]
 
-    def add_memory_hits(self, _hits):
+    def add_memory_hits(self, hits):
         return None
 
-    def add_decision(self, _decision):
+    def add_decision(self, decision):
         return None
 
     def set_final_draft(self, draft: str):
@@ -49,7 +57,10 @@ class _FakeStudio:
 
 class StudioPlanParserTest(unittest.TestCase):
     def _workflow(self) -> StudioWorkflow:
-        return StudioWorkflow(studio=object(), memory_search_func=lambda *_args, **_kwargs: [])
+        return StudioWorkflow(
+            studio=cast(AgentStudio, cast(object, _FakeStudio({}))),
+            memory_search_func=lambda *_args, **_kwargs: [],
+        )
 
     def _chapter(self) -> Chapter:
         return Chapter(
@@ -178,6 +189,66 @@ class StudioPlanParserTest(unittest.TestCase):
         self.assertEqual(parsed["character_decisions"], [])
         self.assertEqual(markdown_parsed["character_decisions"], [])
 
+    def test_generate_plan_applies_llm_title_as_first_stage_title(self):
+        chapter = self._chapter()
+        planned_title = "雾墙后的密钥"
+        director_plan = json.dumps(
+            {
+                "title": planned_title,
+                "beats": [
+                    "陈砚穿过雾墙，发现备份神谕的初始密钥被伪装成旧镜城钟楼残骸。",
+                    "他在封锁窗口期强行校准密钥，触发深网防御系统反制。",
+                    "章尾确认钟楼残骸只是诱饵，真正入口转向旧镜城地底。",
+                ],
+                "conflicts": [
+                    "外部：深网防御系统与追踪者双向夹击。",
+                    "内部：陈砚必须在救同伴与保线索之间二选一。",
+                ],
+                "foreshadowing": ["旧镜城地底入口与陈砚童年记忆重叠。"],
+                "callback_targets": ["回收上一章的六边形符号来源。"],
+                "role_goals": {"陈砚": "在接口崩溃前拿到真实入口坐标。"},
+                "character_decisions": [
+                    {
+                        "character": "陈砚",
+                        "beat_index": 1,
+                        "choice": "提前校准密钥",
+                        "cost": "暴露当前位置",
+                        "rejected_alternative": "撤出钟楼等待支援",
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        )
+
+        studio = _FakeStudio(
+            {
+                AgentRole.DIRECTOR: _ScriptedAgent([director_plan]),
+            }
+        )
+        workflow = StudioWorkflow(
+            studio=cast(AgentStudio, cast(object, studio)),
+            memory_search_func=lambda *_args, **_kwargs: [],
+        )
+
+        plan = asyncio.run(
+            workflow.generate_plan(
+                chapter,
+                {
+                    "project_info": {"name": "测试项目"},
+                    "identity_core": "# IDENTITY",
+                    "runtime_state": "",
+                    "memory_compact": "",
+                    "open_threads": [],
+                    "previous_chapters": [],
+                },
+            )
+        )
+
+        self.assertEqual(plan.title, planned_title)
+        self.assertEqual(chapter.title, planned_title)
+        self.assertEqual(plan.character_decisions[0].character, "陈砚")
+        self.assertEqual(plan.character_decisions[0].choice, "提前校准密钥")
+
     def test_chapter_plan_model_accepts_and_dumps_character_decisions(self):
         plan = ChapterPlan.model_validate(
             {
@@ -234,7 +305,10 @@ class StudioPlanParserTest(unittest.TestCase):
                 AgentRole.ARBITER: _ScriptedAgent([final_text]),
             }
         )
-        workflow = StudioWorkflow(studio=studio, memory_search_func=lambda *_args, **_kwargs: [])
+        workflow = StudioWorkflow(
+            studio=cast(AgentStudio, cast(object, studio)),
+            memory_search_func=lambda *_args, **_kwargs: [],
+        )
         captured: dict[str, object] = {}
 
         def fake_assess(_draft, _chapter, _plan, context):
@@ -289,7 +363,10 @@ class StudioPlanParserTest(unittest.TestCase):
                 AgentRole.ARBITER: _ScriptedAgent([final_text, RuntimeError("retry failed")]),
             }
         )
-        workflow = StudioWorkflow(studio=studio, memory_search_func=lambda *_args, **_kwargs: [])
+        workflow = StudioWorkflow(
+            studio=cast(AgentStudio, cast(object, studio)),
+            memory_search_func=lambda *_args, **_kwargs: [],
+        )
 
         with patch.dict(os.environ, {"DRAFT_QUALITY_SCORING": "1"}, clear=False):
             result = asyncio.run(
