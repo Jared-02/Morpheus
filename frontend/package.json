@@ -15,6 +15,12 @@
     "test:e2e:ui": "playwright test --ui"
   },
   "dependencies": {
+    "@mantine/core": "^7.17.8",
+    "@mantine/form": "^7.17.8",
+    "@mantine/hooks": "^7.17.8",
+    "@mantine/modals": "^7.17.8",
+    "@mantine/notifications": "^7.17.8",
+    "@tabler/icons-react": "^3.41.1",
     "axios": "^1.6.2",
     "d3": "^7.8.5",
     "d3-force": "^3.0.0",

@@ -395,6 +395,63 @@ body {
   transform: none;
 }
 
+/* ===== Studio Shell ===== */
+
+.studio-shell__main {
+  min-height: calc(100vh - 76px);
+}
+
+.workspace-frame {
+  min-height: calc(100vh - 76px);
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.workspace-frame__head {
+  margin-bottom: 4px;
+}
+
+.workspace-frame__title {
+  margin: 0;
+  letter-spacing: -0.03em;
+}
+
+.workspace-frame__mobile-actions {
+  display: none;
+}
+
+.workspace-frame__body {
+  display: grid;
+  gap: 16px;
+  align-items: start;
+}
+
+.workspace-frame__main {
+  min-width: 0;
+}
+
+.workspace-frame__panel {
+  min-width: 0;
+}
+
+@media (max-width: 1024px) {
+  .workspace-frame {
+    padding: 20px;
+  }
+}
+
+@media (max-width: 768px) {
+  .workspace-frame {
+    padding: 16px;
+  }
+
+  .workspace-frame__mobile-actions {
+    display: flex;
+  }
+}
+
 .btn-secondary,
 .ghost-btn {
   background: var(--button-secondary-bg);

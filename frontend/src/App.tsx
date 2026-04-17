@@ -1,6 +1,7 @@
 import { lazy, Suspense } from 'react'
 import { Routes, Route } from 'react-router-dom'
 import AppLayout from './components/layout/AppLayout'
+import StudioAppShell from './app/shell/StudioAppShell'
 import ErrorBoundary from './components/ui/ErrorBoundary'
 import Skeleton from './components/ui/Skeleton'
 
@@ -11,6 +12,10 @@ const ChapterWorkbenchPage = lazy(() => import('./pages/ChapterWorkbenchPage'))
 const MemoryBrowserPage = lazy(() => import('./pages/MemoryBrowserPage'))
 const KnowledgeGraphPage = lazy(() => import('./pages/KnowledgeGraphPage'))
 const TraceReplayPage = lazy(() => import('./pages/TraceReplayPage'))
+const NarrativeModelPage = lazy(() => import('./pages/NarrativeModelPage'))
+const ReplayStudioPage = lazy(() => import('./pages/ReplayStudioPage'))
+const AgentStudioPage = lazy(() => import('./pages/AgentStudioPage'))
+const MediaStudioPage = lazy(() => import('./pages/MediaStudioPage'))
 const DashboardPage = lazy(() => import('./pages/DashboardPage'))
 
 export default function App() {
@@ -18,6 +23,13 @@ export default function App() {
     <ErrorBoundary>
       <Suspense fallback={<div className="app-layout__content"><Skeleton variant="card" count={3} /></div>}>
         <Routes>
+          <Route path="/project/:projectId" element={<StudioAppShell />}>
+            <Route path="model" element={<NarrativeModelPage />} />
+            <Route path="replay" element={<ReplayStudioPage />} />
+            <Route path="agents" element={<AgentStudioPage />} />
+            <Route path="media" element={<MediaStudioPage />} />
+          </Route>
+
           <Route element={<AppLayout />}>
             <Route path="/" element={<ProjectList />} />
             <Route path="/project/:projectId" element={<ProjectDetail />} />
