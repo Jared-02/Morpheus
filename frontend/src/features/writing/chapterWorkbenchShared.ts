@@ -61,6 +61,12 @@ export const chapterStatusMeta: Record<string, { label: string; hint: string }> 
 export type StreamChannel = 'arbiter' | 'director' | 'setter' | 'stylist'
 export type StreamSideChannelText = Record<'director' | 'setter' | 'stylist', string>
 
+export const EMPTY_STREAM_SIDE_CHANNEL_TEXT: StreamSideChannelText = {
+  director: '',
+  setter: '',
+  stylist: '',
+}
+
 interface TraceDecisionPayload {
   agent_role?: string
   decision_text?: string
@@ -81,11 +87,7 @@ function sanitizeTraceDecisionText(value?: string) {
 }
 
 export function buildStreamSideChannelText(trace?: TracePayload | null): StreamSideChannelText {
-  const base: StreamSideChannelText = {
-    director: '',
-    setter: '',
-    stylist: '',
-  }
+  const base: StreamSideChannelText = { ...EMPTY_STREAM_SIDE_CHANNEL_TEXT }
   if (!trace) return base
 
   const snapshot = trace.channel_snapshot || {}
