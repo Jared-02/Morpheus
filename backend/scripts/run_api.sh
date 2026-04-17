@@ -19,7 +19,17 @@ fi
 
 DEFAULT_PYTHON="$ROOT_DIR/venv/bin/python"
 if [ ! -x "$DEFAULT_PYTHON" ]; then
-  DEFAULT_PYTHON="$(command -v python3 || command -v python)"
+  # Prefer Poetry's virtualenv when dependencies are installed there.
+  if command -v poetry >/dev/null 2>&1; then
+    POETRY_ENV_PATH="$(poetry env info --path 2>/dev/null || true)"
+    if [ -n "$POETRY_ENV_PATH" ] && [ -x "$POETRY_ENV_PATH/bin/python" ]; then
+      DEFAULT_PYTHON="$POETRY_ENV_PATH/bin/python"
+    else
+      DEFAULT_PYTHON="$(command -v python3 || command -v python)"
+    fi
+  else
+    DEFAULT_PYTHON="$(command -v python3 || command -v python)"
+  fi
 fi
 PYTHON_BIN="${PYTHON_BIN:-$DEFAULT_PYTHON}"
 HOST="${API_HOST:-127.0.0.1}"
