@@ -46,18 +46,17 @@ async function createChapterAndOpenWorkbench(page: Page) {
   await modal.getByRole('button', { name: '创建并进入' }).click()
 
   await expect(page.getByRole('heading', { name: /第\s*1\s*章/ })).toBeVisible({ timeout: 15000 })
-  const match = page.url().match(/\/chapter\/([^/?#]+)/)
-  if (!match) throw new Error(`Cannot parse chapter id from ${page.url()}`)
-  return match[1]
+  const url = new URL(page.url())
+  const chapterId = url.searchParams.get('chapter')
+  if (!chapterId) throw new Error(`Cannot parse chapter id from ${page.url()}`)
+  return chapterId
 }
 
 async function saveChapterDraft(page: Page, request: APIRequestContext, chapterId: string) {
-  const editor = page.locator('.workbench-channel-viewer__textarea')
+  const editor = page.getByPlaceholder('在这里继续修改本章正文。')
   await expect(editor).toBeVisible()
   await editor.fill('Phase 0 保存基线正文。')
-  await page.getByRole('button', { name: '保存编辑并重检' }).click()
-
-  await expect(page.getByText('草稿保存成功')).toBeVisible({ timeout: 15000 })
+  await page.getByRole('button', { name: '保存草稿' }).click()
 
   const chapterRes = await request.get(`${API_BASE}/chapters/${chapterId}`)
   expect(chapterRes.ok()).toBeTruthy()
@@ -75,13 +74,18 @@ async function captureCriticalPath(page: Page, request: APIRequestContext, viewp
     await page.screenshot({ path: `${SCREENSHOT_DIR}/phase0_${viewportKey}_01_project-detail.png`, fullPage: true })
 
     await page.goto(`/project/${projectId}/write`)
-    await expect(page.getByRole('heading', { name: '创作控制台' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '文本创作' })).toBeVisible()
     await page.screenshot({ path: `${SCREENSHOT_DIR}/phase0_${viewportKey}_02_write.png`, fullPage: true })
 
     await page.goto(`/project/${projectId}`)
     const chapterId = await createChapterAndOpenWorkbench(page)
     await saveChapterDraft(page, request, chapterId)
     await page.screenshot({ path: `${SCREENSHOT_DIR}/phase0_${viewportKey}_03_chapter-save.png`, fullPage: true })
+
+    await page.goto(`/project/${projectId}/write?chapter=${chapterId}&inspector=history`)
+    await expect(page.getByRole('heading', { name: /第\s*1\s*章/ })).toBeVisible()
+    await expect(page.getByText(/最近一次自动保存/)).toBeVisible()
+    await page.screenshot({ path: `${SCREENSHOT_DIR}/phase3_${viewportKey}_06_write_chapter_history.png`, fullPage: true })
 
     await page.goto(`/project/${projectId}/graph`)
     await expect(page.getByRole('heading', { name: '知识图谱' })).toBeVisible()

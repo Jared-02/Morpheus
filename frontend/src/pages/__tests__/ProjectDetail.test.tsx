@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import ProjectDetail from '../ProjectDetail'
 import { useProjectStore } from '../../stores/useProjectStore'
 import { useToastStore } from '../../stores/useToastStore'
@@ -18,11 +18,22 @@ vi.mock('../../lib/api', () => ({
     },
 }))
 
+function LocationProbe() {
+    const location = useLocation()
+    return (
+        <div>
+            <div data-testid="location-pathname">{location.pathname}</div>
+            <div data-testid="location-search">{location.search}</div>
+        </div>
+    )
+}
+
 function renderPage(projectId = 'p1') {
     return render(
         <MemoryRouter initialEntries={[`/project/${projectId}`]}>
             <Routes>
                 <Route path="/project/:projectId" element={<ProjectDetail />} />
+                <Route path="/project/:projectId/write" element={<><div>文本创作页</div><LocationProbe /></>} />
                 <Route path="/" element={<div>项目列表页</div>} />
             </Routes>
         </MemoryRouter>
@@ -161,10 +172,10 @@ describe('ProjectDetailPage', () => {
         expect(screen.getByText(/暂无章节/)).toBeInTheDocument()
     })
 
-    it('does not render sub-page navigation links when quick navigation is disabled', () => {
+    it('renders the new writing studio header entry without restoring old quick navigation', () => {
         useProjectStore.setState({ currentProject: sampleProject, chapters: [], loading: false })
         renderPage()
-        expect(screen.queryByText('创作控制台')).not.toBeInTheDocument()
+        expect(screen.getAllByText('进入文本创作').length).toBeGreaterThan(0)
         expect(screen.queryByText('记忆浏览器')).not.toBeInTheDocument()
         expect(screen.queryByText('知识图谱')).not.toBeInTheDocument()
         expect(screen.queryByText('评测看板')).not.toBeInTheDocument()
@@ -224,12 +235,49 @@ describe('ProjectDetailPage', () => {
         expect(container.querySelector('.page-head')).toBeInTheDocument()
     })
 
-    it('chapter rows link to chapter workbench', () => {
+    it('chapter rows link to the new writing studio chapter route', () => {
         useProjectStore.setState({ currentProject: sampleProject, chapters: sampleChapters, loading: false })
         renderPage()
         const links = screen.getAllByText('进入工作台')
-        expect(links[0].closest('a')).toHaveAttribute('href', '/project/p1/chapter/c1')
-        expect(links[1].closest('a')).toHaveAttribute('href', '/project/p1/chapter/c2')
+        expect(links[0].closest('a')).toHaveAttribute('href', '/project/p1/write?chapter=c1')
+        expect(links[1].closest('a')).toHaveAttribute('href', '/project/p1/write?chapter=c2')
+    })
+
+    it('renders first chapter onboarding entry when the project has no chapters', () => {
+        useProjectStore.setState({ currentProject: sampleProject, chapters: [], loading: false })
+        renderPage()
+        expect(screen.getByRole('link', { name: '开始第一章' })).toHaveAttribute('href', '/project/p1/write?entry=first-chapter')
+    })
+
+    it('navigates to the new writing studio chapter route after creating a chapter', async () => {
+        const fetchProject = vi.fn().mockResolvedValue(undefined)
+        const fetchChapters = vi.fn().mockResolvedValue(undefined)
+        const invalidateCache = vi.fn()
+        mockApiPost.mockResolvedValue({ data: { id: 'c3' } })
+        useProjectStore.setState({
+            currentProject: sampleProject,
+            chapters: sampleChapters,
+            loading: false,
+            fetchProject,
+            fetchChapters,
+            invalidateCache,
+        } as any)
+
+        renderPage()
+        fireEvent.click(screen.getByText('新建章节'))
+
+        const modal = document.querySelector('.modal-card') as HTMLElement
+        const titleInput = modal.querySelectorAll('input.input')[1] as HTMLInputElement
+        const goalTextarea = modal.querySelector('textarea') as HTMLTextAreaElement
+
+        fireEvent.change(titleInput, { target: { value: '第三章' } })
+        fireEvent.change(goalTextarea, { target: { value: '让主角带着误判进入下一幕。' } })
+        fireEvent.click(screen.getByText('创建并进入'))
+
+        await waitFor(() => {
+            expect(screen.getByTestId('location-pathname')).toHaveTextContent('/project/p1/write')
+        })
+        expect(screen.getByTestId('location-search')).toHaveTextContent('chapter=c3')
     })
 
     it('clicking 删除 removes chapter and refreshes project data', async () => {
@@ -432,20 +480,20 @@ describe('ProjectDetailPage', () => {
         })
     })
 
-    describe('quick start entry', () => {
+    describe('writing studio entry', () => {
         beforeEach(() => {
             useProjectStore.setState({ currentProject: sampleProject, chapters: sampleChapters, loading: false })
         })
 
-        it('does not render quick start section when entry is disabled', () => {
+        it('does not restore the legacy quick synopsis section', () => {
             renderPage()
             expect(screen.queryByText('创作起点')).not.toBeInTheDocument()
             expect(screen.queryByPlaceholderText('先写一句话梗概，带着它进入创作控制台继续生成。')).not.toBeInTheDocument()
         })
 
-        it('does not render writing console entry link when quick start section is disabled', () => {
+        it('keeps the explicit writing studio entry visible', () => {
             renderPage()
-            expect(screen.queryByText('进入创作控制台')).not.toBeInTheDocument()
+            expect(screen.getByText('进入文本创作')).toBeInTheDocument()
         })
     })
 })

@@ -63,10 +63,10 @@ export default function StudioTopNav({
             <Text fw={700} fz="lg" lh={1.1} ff="heading">
               Morpheus Studio
             </Text>
-            <Badge variant="light">Phase 1</Badge>
+            <Badge variant="light">Phase 3</Badge>
           </Group>
           <Text size="sm" c="dimmed">
-            {projectName ? `${projectName} · 新工作台壳层已接入` : '新工作台壳层已接入'}
+            {projectName ? `${projectName} · 文本创作工作台已接入新壳层` : '文本创作工作台已接入新壳层'}
           </Text>
         </Stack>
       </Group>

@@ -31,6 +31,13 @@ import {
 
 type ReviewAction = 'approve' | 'reject'
 
+interface ChapterWorkbenchControllerOptions {
+  chapterIdOverride?: string | null
+  onNavigateToChapter?: (chapterId: string) => void
+  onExitToProject?: () => void
+  recentAccessPathBuilder?: (projectId: string, chapterId: string) => string
+}
+
 function sanitizeReadingModeText(value: string) {
   return String(value || '')
     .replace(/<(?:think|thinking)>[\s\S]*?<\/(?:think|thinking)>/gi, '')
@@ -60,8 +67,15 @@ async function deleteChapterRequest(targetChapterId: string) {
   }
 }
 
-export default function useChapterWorkbenchController() {
-  const { projectId, chapterId } = useParams<{ projectId: string; chapterId: string }>()
+export default function useChapterWorkbenchController(options: ChapterWorkbenchControllerOptions = {}) {
+  const {
+    chapterIdOverride,
+    onNavigateToChapter,
+    onExitToProject,
+    recentAccessPathBuilder,
+  } = options
+  const { projectId, chapterId: routeChapterId } = useParams<{ projectId: string; chapterId: string }>()
+  const chapterId = chapterIdOverride ?? routeChapterId
   const navigate = useNavigate()
 
   const currentProject = useProjectStore((state) => state.currentProject)
@@ -132,7 +146,11 @@ export default function useChapterWorkbenchController() {
         removeChapter(chapterId)
         addToast('warning', '该章节已不存在，已从最近访问中移除')
         if (projectId) {
-          navigate(`/project/${projectId}`)
+          if (onExitToProject) {
+            onExitToProject()
+          } else {
+            navigate(`/project/${projectId}`)
+          }
         }
       } else {
         addToast('error', '加载章节失败，请稍后重试')
@@ -140,7 +158,7 @@ export default function useChapterWorkbenchController() {
     } finally {
       setLoading(false)
     }
-  }, [addToast, chapterId, navigate, projectId, removeChapter])
+  }, [addToast, chapterId, navigate, onExitToProject, projectId, removeChapter])
 
   useEffect(() => {
     if (projectId && currentProject?.id !== projectId) {
@@ -174,15 +192,17 @@ export default function useChapterWorkbenchController() {
 
   useEffect(() => {
     if (chapter && chapterId && projectId) {
-      addAccess({
-        type: 'chapter',
-        id: chapterId,
-        name: `第 ${chapter.chapter_number} 章 · ${chapter.title}`,
-        path: `/project/${projectId}/chapter/${chapterId}`,
-        projectId,
-      })
-    }
-  }, [addAccess, chapter, chapterId, projectId])
+        addAccess({
+          type: 'chapter',
+          id: chapterId,
+          name: `第 ${chapter.chapter_number} 章 · ${chapter.title}`,
+          path: recentAccessPathBuilder
+            ? recentAccessPathBuilder(projectId, chapterId)
+            : `/project/${projectId}/chapter/${chapterId}`,
+          projectId,
+        })
+      }
+  }, [addAccess, chapter, chapterId, projectId, recentAccessPathBuilder])
 
   useEffect(() => {
     return () => {
@@ -356,9 +376,13 @@ export default function useChapterWorkbenchController() {
   const navigateToChapter = useCallback((index: number) => {
     const target = sortedChapters[index]
     if (target && projectId) {
-      navigate(`/project/${projectId}/chapter/${target.id}`)
+      if (onNavigateToChapter) {
+        onNavigateToChapter(target.id)
+      } else {
+        navigate(`/project/${projectId}/chapter/${target.id}`)
+      }
     }
-  }, [navigate, projectId, sortedChapters])
+  }, [navigate, onNavigateToChapter, projectId, sortedChapters])
 
   const readingTocItems = useMemo(
     () =>
@@ -803,7 +827,11 @@ export default function useChapterWorkbenchController() {
       invalidateCache('chapters', projectId)
       addToast('success', `第 ${snapshot.chapter_number} 章已删除`)
       addRecord({ type: 'delete', description: `删除章节: ${snapshot.title}`, status: 'success' })
-      navigate(`/project/${projectId}`)
+      if (onExitToProject) {
+        onExitToProject()
+      } else {
+        navigate(`/project/${projectId}`)
+      }
     } catch (error: any) {
       addToast('error', '删除章节失败', {
         context: '章节删除',
@@ -827,6 +855,7 @@ export default function useChapterWorkbenchController() {
     chapterId,
     invalidateCache,
     navigate,
+    onExitToProject,
     projectId,
     removeChapter,
   ])

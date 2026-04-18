@@ -46,8 +46,8 @@ test('system bugfix regression', async ({ page, request }) => {
 
   await expect(page.getByRole('heading', { name: nameA })).toBeVisible()
   await page.locator('.sidebar').getByRole('link', { name: '创作控制台' }).click()
-  await expect(page.getByRole('heading', { name: '创作控制台' })).toBeVisible()
-  await expect(page.locator('.writing-header__sub')).toContainText(nameA)
+  await expect(page.getByRole('heading', { name: '文本创作' })).toBeVisible()
+  await expect(page.getByText(`${nameA} · 批量生成与逐章编辑收敛到同一路由。`)).toBeVisible()
   await page.screenshot({ path: `${SCREENSHOT_DIR}/system_bugfix_01_write_project_a.png`, fullPage: true })
 
   const projectB = await createProjectFromModal(page, nameB)
@@ -55,9 +55,9 @@ test('system bugfix regression', async ({ page, request }) => {
 
   await expect(page.getByRole('heading', { name: nameB })).toBeVisible()
   await page.locator('.sidebar').getByRole('link', { name: '创作控制台' }).click()
-  await expect(page.getByRole('heading', { name: '创作控制台' })).toBeVisible()
-  await expect(page.locator('.writing-header__sub')).toContainText(nameB)
-  await expect(page.locator('.writing-header__sub')).not.toContainText(nameA)
+  await expect(page.getByRole('heading', { name: '文本创作' })).toBeVisible()
+  await expect(page.getByText(`${nameB} · 批量生成与逐章编辑收敛到同一路由。`)).toBeVisible()
+  await expect(page.getByText(`${nameA} · 批量生成与逐章编辑收敛到同一路由。`)).toHaveCount(0)
   await page.screenshot({ path: `${SCREENSHOT_DIR}/system_bugfix_02_write_project_b.png`, fullPage: true })
 
   await page.goto(`/project/${projectB}`)
@@ -74,13 +74,12 @@ test('system bugfix regression', async ({ page, request }) => {
   await chapterModal.locator('textarea').fill('用于回归测试的一章')
   await chapterModal.getByRole('button', { name: '创建并进入' }).click()
 
-  await page.getByRole('link', { name: '进入工作台' }).first().click()
   await expect(page.getByRole('heading', { name: /第\s*\d+\s*章/ })).toBeVisible()
 
-  await expect(page.getByRole('button', { name: '重做本章' })).toBeVisible()
-  await expect(page.getByText('修改方向（可选）')).toBeVisible()
-  await expect(page.getByPlaceholder('描述你想怎么改这一章，如：把背叛改成暗中保护的误会')).toBeVisible()
-  await page.screenshot({ path: `${SCREENSHOT_DIR}/system_bugfix_03_number_inputs.png`, fullPage: true })
+  await expect(page.getByRole('button', { name: '重做正文' })).toBeVisible()
+  await expect(page.getByText('方向提示')).toBeVisible()
+  await expect(page.getByPlaceholder('给本章增加明确的重做方向，留空则沿用章节目标。')).toBeVisible()
+  await page.screenshot({ path: `${SCREENSHOT_DIR}/system_bugfix_03_writing_studio_chapter.png`, fullPage: true })
 
   const delResp = await request.delete(`${API_BASE}/projects/${projectB}`)
   expect(delResp.ok()).toBeTruthy()

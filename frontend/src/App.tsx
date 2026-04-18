@@ -7,8 +7,8 @@ import Skeleton from './components/ui/Skeleton'
 
 const ProjectList = lazy(() => import('./pages/ProjectList'))
 const ProjectDetail = lazy(() => import('./pages/ProjectDetail'))
-const WritingConsolePage = lazy(() => import('./pages/WritingConsolePage'))
-const ChapterWorkbenchPage = lazy(() => import('./pages/ChapterWorkbenchPage'))
+const WritingStudioPage = lazy(() => import('./pages/WritingStudioPage'))
+const LegacyChapterRedirect = lazy(() => import('./pages/LegacyChapterRedirect'))
 const MemoryBrowserPage = lazy(() => import('./pages/MemoryBrowserPage'))
 const KnowledgeGraphPage = lazy(() => import('./pages/KnowledgeGraphPage'))
 const TraceReplayPage = lazy(() => import('./pages/TraceReplayPage'))
@@ -24,18 +24,19 @@ export default function App() {
       <Suspense fallback={<div className="app-layout__content"><Skeleton variant="card" count={3} /></div>}>
         <Routes>
           <Route path="/project/:projectId" element={<StudioAppShell />}>
+            <Route path="write" element={<WritingStudioPage />} />
             <Route path="model" element={<NarrativeModelPage />} />
             <Route path="replay" element={<ReplayStudioPage />} />
             <Route path="agents" element={<AgentStudioPage />} />
             <Route path="media" element={<MediaStudioPage />} />
           </Route>
 
+          <Route path="/project/:projectId/chapter" element={<LegacyChapterRedirect />} />
+          <Route path="/project/:projectId/chapter/:chapterId" element={<LegacyChapterRedirect />} />
+
           <Route element={<AppLayout />}>
             <Route path="/" element={<ProjectList />} />
             <Route path="/project/:projectId" element={<ProjectDetail />} />
-            <Route path="/project/:projectId/write" element={<WritingConsolePage />} />
-            <Route path="/project/:projectId/chapter" element={<ChapterWorkbenchPage />} />
-            <Route path="/project/:projectId/chapter/:chapterId" element={<ChapterWorkbenchPage />} />
             <Route path="/project/:projectId/memory" element={<MemoryBrowserPage />} />
             <Route path="/project/:projectId/graph" element={<KnowledgeGraphPage />} />
             <Route path="/project/:projectId/trace" element={<TraceReplayPage />} />

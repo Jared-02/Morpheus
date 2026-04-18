@@ -68,7 +68,7 @@ export default function StudioAppShell() {
               )
             })}
             <Text size="sm" c="dimmed" mt="sm">
-              文本创作当前仍使用旧工作台，后续在 Phase 3 迁入新壳层。
+              旧章节链接会自动兼容跳转到新的文本创作工作台。
             </Text>
           </Stack>
         </ScrollArea.Autosize>

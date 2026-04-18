@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useProjectStore, type ChapterItem } from '../stores/useProjectStore'
 import { useToastStore } from '../stores/useToastStore'
 import { useActivityStore } from '../stores/useActivityStore'
@@ -14,6 +14,7 @@ import { useConfirmClose } from '../hooks/useConfirmClose'
 
 export default function ProjectDetail() {
   const { projectId } = useParams<{ projectId: string }>()
+  const navigate = useNavigate()
   const {
     currentProject,
     chapters,
@@ -116,6 +117,17 @@ export default function ProjectDetail() {
     })
   }
 
+  const buildWriteStudioPath = (chapterId?: string | null) => {
+    if (!projectId) return '/'
+    if (!chapterId) return `/project/${projectId}/write`
+    return `/project/${projectId}/write?chapter=${chapterId}`
+  }
+
+  const buildFirstChapterPath = () => {
+    if (!projectId) return '/'
+    return `/project/${projectId}/write?entry=first-chapter`
+  }
+
   useEffect(() => {
     if (!showModal) return
     const onKeyDown = (e: KeyboardEvent) => {
@@ -167,12 +179,13 @@ export default function ProjectDetail() {
     if (!projectId || !form.title.trim() || !form.goal.trim()) return
     setCreating(true)
     try {
-      await api.post('/chapters', {
+      const response = await api.post('/chapters', {
         project_id: projectId,
         chapter_number: form.chapter_number,
         title: form.title,
         goal: form.goal,
       })
+      const createdChapterId = String(response?.data?.id || '').trim()
       setShowModal(false)
       const nextChapterNumber = form.chapter_number + 1
       setForm({ chapter_number: nextChapterNumber, title: '', goal: '' })
@@ -184,6 +197,9 @@ export default function ProjectDetail() {
       invalidateCache('project', projectId)
       await fetchProject(projectId, { force: true })
       await fetchChapters(projectId, { force: true })
+      if (createdChapterId) {
+        navigate(buildWriteStudioPath(createdChapterId))
+      }
     } catch (error: any) {
       console.error(error)
       addToast('error', '创建章节失败', {
@@ -373,13 +389,16 @@ export default function ProjectDetail() {
             </p>
           </div>
           <div className="grid-actions">
-            <button className="btn btn-secondary" onClick={handleExportProject}>导出项目</button>
-            <button className="btn btn-secondary" onClick={() => void handleExportBook()} disabled={exportingBook}>
-              {exportingBook ? '导出准备中...' : '整书导出'}
-            </button>
-            <button className="btn btn-primary" onClick={() => setShowModal(true)}>新建章节</button>
-          </div>
-        </div>
+             <button className="btn btn-secondary" onClick={handleExportProject}>导出项目</button>
+             <button className="btn btn-secondary" onClick={() => void handleExportBook()} disabled={exportingBook}>
+               {exportingBook ? '导出准备中...' : '整书导出'}
+             </button>
+             <Link to={buildWriteStudioPath()} className="btn btn-secondary" style={{ textDecoration: 'none' }}>
+               进入文本创作
+             </Link>
+             <button className="btn btn-primary" onClick={() => setShowModal(true)}>新建章节</button>
+           </div>
+         </div>
 
         <section className="grid-4">
           <div className="card metric-card">
@@ -452,6 +471,23 @@ export default function ProjectDetail() {
           </div>
         </section>
         */}
+
+        {chapters.length === 0 && (
+          <section className="card" style={{ padding: 14, marginTop: 16 }}>
+            <h2 className="section-title">开始第一章</h2>
+            <p className="muted" style={{ marginTop: 6, marginBottom: 10 }}>
+              还没有已保存章节时，可以直接进入文本创作工作台的首章引导模式。
+            </p>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <Link to={buildFirstChapterPath()} className="btn btn-primary" style={{ textDecoration: 'none' }}>
+                开始第一章
+              </Link>
+              <Link to={buildWriteStudioPath()} className="btn btn-secondary" style={{ textDecoration: 'none' }}>
+                进入文本创作
+              </Link>
+            </div>
+          </section>
+        )}
 
         {/* 章节列表 */}
         <section className="card" style={{ padding: 14, marginTop: 16 }}>
@@ -544,7 +580,7 @@ export default function ProjectDetail() {
                 {chapters.length === 0 && (
                   <tr>
                     <td colSpan={8} className="muted">
-                      暂无章节，先创建第一章并进入章节工作台生成蓝图。
+                      暂无章节，先创建第一章或进入文本创作工作台开始生成。
                     </td>
                   </tr>
                 )}
@@ -566,7 +602,7 @@ export default function ProjectDetail() {
                     <td>{chapter.conflict_count}</td>
                     <td>
                       <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                        <Link to={`/project/${projectId}/chapter/${chapter.id}`}>进入工作台</Link>
+                        <Link to={buildWriteStudioPath(chapter.id)}>进入工作台</Link>
                         <button
                           className="btn btn-secondary"
                           style={{ padding: '4px 10px', fontSize: '0.78rem' }}
