@@ -39,6 +39,8 @@ export default function StudioTopNav({
   const setThemeMode = useUIStore((state) => state.setThemeMode)
   const resolvedTheme = resolveThemeMode(themeMode)
   const nextTheme = resolvedTheme === 'dark' ? 'light' : 'dark'
+  const activeNavItem = STUDIO_NAV_ITEMS.find((item) => isStudioNavActive(location.pathname, item.to(projectId)))
+  const activeLabel = activeNavItem?.label || '工作台'
 
   return (
     <Group justify="space-between" h="100%" px={{ base: 'md', md: 'xl' }} wrap="nowrap">
@@ -58,18 +60,18 @@ export default function StudioTopNav({
         >
           <IconArrowLeft size={18} stroke={1.8} />
         </ActionIcon>
-        <Stack gap={2}>
-          <Group gap="xs" wrap="nowrap">
-            <Text fw={700} fz="lg" lh={1.1} ff="heading">
-              Morpheus Studio
+          <Stack gap={2}>
+            <Group gap="xs" wrap="nowrap">
+              <Text fw={700} fz="lg" lh={1.1} ff="heading">
+                Morpheus Studio
+              </Text>
+              <Badge variant="light">Phase 4</Badge>
+            </Group>
+            <Text size="sm" c="dimmed">
+              {projectName ? `${projectName} · ${activeLabel}工作台已接入新壳层` : `${activeLabel}工作台已接入新壳层`}
             </Text>
-            <Badge variant="light">Phase 3</Badge>
-          </Group>
-          <Text size="sm" c="dimmed">
-            {projectName ? `${projectName} · 文本创作工作台已接入新壳层` : '文本创作工作台已接入新壳层'}
-          </Text>
-        </Stack>
-      </Group>
+          </Stack>
+        </Group>
 
       <Group gap="xs" visibleFrom="md" wrap="nowrap">
         {STUDIO_NAV_ITEMS.map((item) => {

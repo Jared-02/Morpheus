@@ -88,8 +88,9 @@ async function captureCriticalPath(page: Page, request: APIRequestContext, viewp
     await page.screenshot({ path: `${SCREENSHOT_DIR}/phase3_${viewportKey}_06_write_chapter_history.png`, fullPage: true })
 
     await page.goto(`/project/${projectId}/graph`)
-    await expect(page.getByRole('heading', { name: '知识图谱' })).toBeVisible()
-    await page.screenshot({ path: `${SCREENSHOT_DIR}/phase0_${viewportKey}_04_graph.png`, fullPage: true })
+    await expect(page).toHaveURL(new RegExp(`/project/${projectId}/model\\?tab=graph`))
+    await expect(page.getByRole('heading', { name: '叙事建模' })).toBeVisible()
+    await page.screenshot({ path: `${SCREENSHOT_DIR}/phase4_${viewportKey}_04_model.png`, fullPage: true })
 
     await page.goto(`/project/${projectId}/trace`)
     await expect(page.getByRole('heading', { name: /决策回放/ })).toBeVisible()

@@ -78,6 +78,7 @@ describe('Sidebar', () => {
             renderSidebar('/project/p1')
             expect(screen.getByText('项目概览')).toBeInTheDocument()
             expect(screen.getByText('创作控制台')).toBeInTheDocument()
+            expect(screen.getByText('叙事建模')).toBeInTheDocument()
             expect(screen.getByText('章节工作台')).toBeInTheDocument()
             expect(screen.getByText('记忆浏览器')).toBeInTheDocument()
             expect(screen.getByText('决策回放')).toBeInTheDocument()
@@ -149,10 +150,16 @@ describe('Sidebar', () => {
             expect(subNavLinks[0].classList.contains('sidebar__link--active')).toBe(false)
         })
 
+        it('highlights 叙事建模 on /project/:id/model', () => {
+            const { container } = renderSidebar('/project/p1/model')
+            const subNavLinks = container.querySelectorAll('.sidebar__section:nth-child(2) .sidebar__link')
+            expect(subNavLinks[2].classList.contains('sidebar__link--active')).toBe(true)
+        })
+
         it('highlights 章节工作台 on /project/:id/chapter/:chapterId (prefix match)', () => {
             const { container } = renderSidebar('/project/p1/chapter/ch1')
             const subNavLinks = container.querySelectorAll('.sidebar__section:nth-child(2) .sidebar__link')
-            expect(subNavLinks[2].classList.contains('sidebar__link--active')).toBe(true)
+            expect(subNavLinks[3].classList.contains('sidebar__link--active')).toBe(true)
         })
 
         it('highlights 决策回放 on /project/:id/trace/:chapterId (prefix match)', () => {
@@ -168,26 +175,24 @@ describe('Sidebar', () => {
         })
     })
 
-    describe('知识图谱 nav entry', () => {
-        it('shows 知识图谱 link when on project route (GRAPH_FEATURE_ENABLED=true)', () => {
+    describe('叙事建模 nav entry', () => {
+        it('shows 叙事建模 link when on project route', () => {
             renderSidebar('/project/p1')
-            expect(screen.getByText('知识图谱')).toBeInTheDocument()
+            expect(screen.getByText('叙事建模')).toBeInTheDocument()
         })
 
-        it('highlights 知识图谱 on /project/:id/graph', () => {
-            const { container } = renderSidebar('/project/p1/graph')
+        it('highlights 叙事建模 on /project/:id/model', () => {
+            const { container } = renderSidebar('/project/p1/model')
             const subNavLinks = container.querySelectorAll('.sidebar__section:nth-child(2) .sidebar__link')
-            // 知识图谱 is the 5th sub-nav link (index 4)
-            expect(subNavLinks[4].classList.contains('sidebar__link--active')).toBe(true)
+            expect(subNavLinks[2].classList.contains('sidebar__link--active')).toBe(true)
         })
 
-        it('includes 知识图谱 in project sub-nav items', () => {
+        it('includes 叙事建模 in project sub-nav items', () => {
             renderSidebar('/project/p1')
-            const graphLink = screen.getByText('知识图谱')
-            expect(graphLink).toBeInTheDocument()
-            // Verify it's a link to /project/:id/graph
-            const linkElement = graphLink.closest('a')
-            expect(linkElement?.getAttribute('href')).toBe('/project/p1/graph')
+            const modelLink = screen.getByText('叙事建模')
+            expect(modelLink).toBeInTheDocument()
+            const linkElement = modelLink.closest('a')
+            expect(linkElement?.getAttribute('href')).toBe('/project/p1/model')
         })
     })
 

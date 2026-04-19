@@ -453,6 +453,30 @@ export function buildL4GraphNodes(l4Nodes: L4GraphNode[], l4Edges: L4GraphEdge[]
   })
 }
 
+export function buildL4GridNodes(l4Nodes: L4GraphNode[], l4Edges: L4GraphEdge[]): Node<EntityNodeData>[] {
+  if (l4Nodes.length === 0) return []
+
+  const nodeIds = new Set(l4Nodes.map((node) => node.id))
+  const degree = new Map<string, number>()
+  for (const node of l4Nodes) degree.set(node.id, 0)
+
+  for (const edge of l4Edges) {
+    if (!nodeIds.has(edge.source) || !nodeIds.has(edge.target) || edge.source === edge.target) continue
+    degree.set(edge.source, (degree.get(edge.source) ?? 0) + 1)
+    degree.set(edge.target, (degree.get(edge.target) ?? 0) + 1)
+  }
+
+  const columns = Math.max(2, Math.ceil(Math.sqrt(l4Nodes.length)))
+  const xGap = 240
+  const yGap = 180
+
+  return l4Nodes.map((node, index) => {
+    const column = index % columns
+    const row = Math.floor(index / columns)
+    return makeRfNode(node, { x: column * xGap, y: row * yGap }, degree.get(node.id) ?? 0)
+  })
+}
+
 export function buildL4GraphEdges(l4Edges: L4GraphEdge[], nodeIds: Set<string>): Edge[] {
   return l4Edges
     .filter((edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target) && edge.source !== edge.target)
