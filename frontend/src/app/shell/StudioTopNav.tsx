@@ -1,5 +1,5 @@
-import { ActionIcon, Badge, Burger, Button, Group, Stack, Text } from '@mantine/core'
-import { IconArrowLeft, IconMoonStars, IconSunHigh } from '@tabler/icons-react'
+import { ActionIcon, Burger, Button, Group, Text } from '@mantine/core'
+import { IconMoonStars, IconSunHigh } from '@tabler/icons-react'
 import { Link, useLocation } from 'react-router-dom'
 import { resolveThemeMode } from '../../theme/themeSystem'
 import { useUIStore } from '../../stores/useUIStore'
@@ -17,20 +17,23 @@ export const STUDIO_NAV_ITEMS: StudioNavItem[] = [
   { label: '智能体', to: (projectId) => `/project/${projectId}/agents` },
 ]
 
+const PROJECT_ENTRY_ITEMS = [
+  { label: '我的项目', to: '/' },
+  { label: '项目详情', to: (projectId: string) => `/project/${projectId}` },
+] as const
+
 export function isStudioNavActive(pathname: string, target: string) {
   return pathname === target || pathname.startsWith(`${target}/`)
 }
 
 interface StudioTopNavProps {
   projectId: string
-  projectName?: string
   mobileNavOpened: boolean
   onToggleMobileNav: () => void
 }
 
 export default function StudioTopNav({
   projectId,
-  projectName,
   mobileNavOpened,
   onToggleMobileNav,
 }: StudioTopNavProps) {
@@ -39,8 +42,6 @@ export default function StudioTopNav({
   const setThemeMode = useUIStore((state) => state.setThemeMode)
   const resolvedTheme = resolveThemeMode(themeMode)
   const nextTheme = resolvedTheme === 'dark' ? 'light' : 'dark'
-  const activeNavItem = STUDIO_NAV_ITEMS.find((item) => isStudioNavActive(location.pathname, item.to(projectId)))
-  const activeLabel = activeNavItem?.label || '工作台'
 
   return (
     <Group justify="space-between" h="100%" px={{ base: 'md', md: 'xl' }} wrap="nowrap">
@@ -52,26 +53,27 @@ export default function StudioTopNav({
           size="sm"
           aria-label={mobileNavOpened ? '收起工作台导航' : '打开工作台导航'}
         />
-        <ActionIcon
-          component={Link}
-          to={`/project/${projectId}`}
-          size="lg"
-          aria-label="返回项目概览"
-        >
-          <IconArrowLeft size={18} stroke={1.8} />
-        </ActionIcon>
-          <Stack gap={2}>
-            <Group gap="xs" wrap="nowrap">
-              <Text fw={700} fz="lg" lh={1.1} ff="heading">
-                Morpheus Studio
-              </Text>
-              <Badge variant="light">Phase 4</Badge>
-            </Group>
-            <Text size="sm" c="dimmed">
-              {projectName ? `${projectName} · ${activeLabel}工作台已接入新壳层` : `${activeLabel}工作台已接入新壳层`}
-            </Text>
-          </Stack>
-        </Group>
+        <Text fw={700} fz="lg" lh={1.1} ff="heading">
+          Morpheus Studio
+        </Text>
+      </Group>
+
+      <Group gap="xs" visibleFrom="md" wrap="nowrap">
+        {PROJECT_ENTRY_ITEMS.map((item) => {
+          const target = typeof item.to === 'function' ? item.to(projectId) : item.to
+          const active = target === '/' ? location.pathname === '/' : location.pathname === target
+          return (
+            <Button
+              key={item.label}
+              component={Link}
+              to={target}
+              variant={active ? 'filled' : 'subtle'}
+            >
+              {item.label}
+            </Button>
+          )
+        })}
+      </Group>
 
       <Group gap="xs" visibleFrom="md" wrap="nowrap">
         {STUDIO_NAV_ITEMS.map((item) => {

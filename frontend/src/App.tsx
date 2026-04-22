@@ -24,6 +24,7 @@ export default function App() {
       <Suspense fallback={<div className="app-layout__content"><Skeleton variant="card" count={3} /></div>}>
         <Routes>
           <Route path="/project/:projectId" element={<StudioAppShell />}>
+            <Route index element={<ProjectDetail />} />
             <Route path="write" element={<WritingStudioPage />} />
             <Route path="model" element={<NarrativeModelPage />} />
             <Route path="replay" element={<ReplayStudioPage />} />
@@ -36,7 +37,6 @@ export default function App() {
 
           <Route element={<AppLayout />}>
             <Route path="/" element={<ProjectList />} />
-            <Route path="/project/:projectId" element={<ProjectDetail />} />
             <Route path="/project/:projectId/memory" element={<MemoryBrowserPage />} />
             <Route path="/project/:projectId/graph" element={<KnowledgeGraphPage />} />
             <Route path="/project/:projectId/trace" element={<TraceReplayPage />} />

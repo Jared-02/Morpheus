@@ -382,7 +382,6 @@ export default function ProjectDetail() {
       <div>
         <div className="page-head">
           <div>
-            <Link to="/" className="muted" style={{ textDecoration: 'none' }}>← 返回项目列表</Link>
             <h1 className="title" style={{ marginTop: 6 }}>{currentProject.name}</h1>
             <p className="subtitle" style={{ marginBottom: 0 }}>
               {currentProject.genre} · {currentProject.style} · 目标 {currentProject.target_length.toLocaleString()} 字
