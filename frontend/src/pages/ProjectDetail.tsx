@@ -343,7 +343,7 @@ export default function ProjectDetail() {
               <div style={{ marginTop: 10 }}><Skeleton variant="text" /></div>
             </div>
           </div>
-          <section className="grid-4">
+          <section className="grid-4 project-detail-metrics">
             <Skeleton variant="metric-card" count={4} />
           </section>
           <div style={{ marginTop: 16 }}>
@@ -379,15 +379,15 @@ export default function ProjectDetail() {
 
   return (
     <PageTransition>
-      <div>
-        <div className="page-head">
-          <div>
-            <h1 className="title" style={{ marginTop: 6 }}>{currentProject.name}</h1>
-            <p className="subtitle" style={{ marginBottom: 0 }}>
+      <div className="project-detail-page">
+        <div className="page-head project-detail-head">
+          <div className="project-detail-head__info">
+            <h1 className="title project-detail-title">{currentProject.name}</h1>
+            <p className="subtitle project-detail-subtitle">
               {currentProject.genre} · {currentProject.style} · 目标 {currentProject.target_length.toLocaleString()} 字
             </p>
           </div>
-          <div className="grid-actions">
+          <div className="grid-actions project-detail-head__actions">
              <button className="btn btn-secondary" onClick={handleExportProject}>导出项目</button>
              <button className="btn btn-secondary" onClick={() => void handleExportBook()} disabled={exportingBook}>
                {exportingBook ? '导出准备中...' : '整书导出'}
@@ -399,22 +399,22 @@ export default function ProjectDetail() {
            </div>
          </div>
 
-        <section className="grid-4">
-          <div className="card metric-card">
+        <section className="grid-4 project-detail-metrics">
+          <div className="card metric-card project-detail-metric-card">
             <div className="metric-label">章节总数</div>
             <div className="metric-value">{currentProject.chapter_count}</div>
           </div>
-          <div className="card metric-card">
+          <div className="card metric-card project-detail-metric-card">
             <div className="metric-label">角色实体</div>
             <div className="metric-value">{currentProject.entity_count}</div>
           </div>
-          <div className="card metric-card">
+          <div className="card metric-card project-detail-metric-card">
             <div className="metric-label">事件节点</div>
             <div className="metric-value">{currentProject.event_count}</div>
           </div>
-          <div className="card metric-card">
+          <div className="card metric-card project-detail-metric-card">
             <div className="metric-label">项目状态</div>
-            <div className="metric-value" style={{ fontSize: '1.15rem' }}>{currentProject.status}</div>
+            <div className="metric-value project-detail-metric-status">{currentProject.status}</div>
           </div>
         </section>
 
@@ -472,12 +472,12 @@ export default function ProjectDetail() {
         */}
 
         {chapters.length === 0 && (
-          <section className="card" style={{ padding: 14, marginTop: 16 }}>
+          <section className="card project-detail-empty-state">
             <h2 className="section-title">开始第一章</h2>
-            <p className="muted" style={{ marginTop: 6, marginBottom: 10 }}>
+            <p className="muted project-detail-empty-state__hint">
               还没有已保存章节时，可以直接进入文本创作工作台的首章引导模式。
             </p>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <div className="project-detail-empty-state__actions">
               <Link to={buildFirstChapterPath()} className="btn btn-primary" style={{ textDecoration: 'none' }}>
                 开始第一章
               </Link>
@@ -489,13 +489,13 @@ export default function ProjectDetail() {
         )}
 
         {/* 章节列表 */}
-        <section className="card" style={{ padding: 14, marginTop: 16 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+        <section className="card project-detail-chapter-list">
+          <div className="project-detail-chapter-list__head">
             <h2 className="section-title">章节列表</h2>
             <span className="chip">共 {chapters.length} 章{filteredChapters.length !== chapters.length ? ` · 筛选 ${filteredChapters.length} 章` : ''}</span>
           </div>
           {/* 搜索 + 筛选 + 排序 工具栏 */}
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10, alignItems: 'center' }}>
+          <div className="project-detail-chapter-list__filters">
             <input
               className="input"
               style={{ flex: 1, minWidth: 180, maxWidth: 320 }}
@@ -517,7 +517,7 @@ export default function ProjectDetail() {
             </select>
           </div>
           {selectedChapterIds.length > 0 && (
-            <div style={{ display: 'flex', gap: 8, marginBottom: 10, alignItems: 'center' }}>
+            <div className="project-detail-chapter-list__batch-actions">
               <button
                 className="danger-btn"
                 style={{ fontSize: '0.85rem' }}
@@ -536,7 +536,7 @@ export default function ProjectDetail() {
             </div>
           )}
           {chaptersError && (
-            <div className="card-strong" style={{ padding: 10, marginBottom: 10 }}>
+            <div className="card-strong project-detail-chapter-list__error">
               <p style={{ margin: 0 }}>{chaptersError}</p>
               <button
                 className="btn btn-secondary"
@@ -547,7 +547,7 @@ export default function ProjectDetail() {
               </button>
             </div>
           )}
-          <div className="table-wrap">
+          <div className="table-wrap project-detail-chapter-list__table">
             <table>
               <thead>
                 <tr>
@@ -600,11 +600,10 @@ export default function ProjectDetail() {
                     <td>{chapter.word_count}</td>
                     <td>{chapter.conflict_count}</td>
                     <td>
-                      <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                      <div className="project-detail-chapter-list__row-actions">
                         <Link to={buildWriteStudioPath(chapter.id)}>进入工作台</Link>
                         <button
-                          className="btn btn-secondary"
-                          style={{ padding: '4px 10px', fontSize: '0.78rem' }}
+                          className="btn btn-secondary project-detail-chapter-list__delete-btn"
                           disabled={deletingChapterId === chapter.id}
                           onClick={() => void handleDeleteChapter(chapter)}
                         >
