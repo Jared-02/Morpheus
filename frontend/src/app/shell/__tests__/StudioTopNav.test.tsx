@@ -1,37 +1,35 @@
 import { describe, expect, it } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { MantineProvider } from '@mantine/core'
-import { MemoryRouter } from 'react-router-dom'
 import StudioTopNav from '../StudioTopNav'
 
-function renderNav(initialPath = '/project/p1/model') {
+function renderNav(projectName?: string) {
   return render(
     <MantineProvider>
-      <MemoryRouter initialEntries={[initialPath]}>
-        <div style={{ height: 76 }}>
-          <StudioTopNav
-            projectId="p1"
-            mobileNavOpened={false}
-            onToggleMobileNav={() => undefined}
-          />
-        </div>
-      </MemoryRouter>
+      <div style={{ height: 76 }}>
+        <StudioTopNav
+          projectName={projectName}
+          mobileNavOpened={false}
+          onToggleMobileNav={() => undefined}
+        />
+      </div>
     </MantineProvider>,
   )
 }
 
 describe('StudioTopNav', () => {
-  it('renders project entry buttons with correct targets', () => {
-    renderNav()
+  it('renders brand and provided project name', () => {
+    renderNav('测试项目A')
 
-    expect(screen.getByRole('link', { name: '我的项目' })).toHaveAttribute('href', '/')
-    expect(screen.getByRole('link', { name: '项目详情' })).toHaveAttribute('href', '/project/p1')
+    expect(screen.getByText('Morpheus Studio')).toBeInTheDocument()
+    expect(screen.getByText('测试项目A')).toBeInTheDocument()
   })
 
-  it('keeps project detail button active on detail page', () => {
-    renderNav('/project/p1')
+  it('falls back to default project name when missing', () => {
+    renderNav()
 
-    const detailLink = screen.getByRole('link', { name: '项目详情' })
-    expect(detailLink.getAttribute('data-variant')).toBe('filled')
+    expect(screen.getByText('赛博之城')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '白天模式' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '夜晚模式' })).toBeInTheDocument()
   })
 })

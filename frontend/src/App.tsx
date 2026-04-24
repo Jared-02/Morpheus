@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react'
-import { Routes, Route } from 'react-router-dom'
+import { Navigate, Routes, Route } from 'react-router-dom'
 import AppLayout from './components/layout/AppLayout'
 import StudioAppShell from './app/shell/StudioAppShell'
 import ErrorBoundary from './components/ui/ErrorBoundary'
@@ -16,6 +16,7 @@ const NarrativeModelPage = lazy(() => import('./pages/NarrativeModelPage'))
 const ReplayStudioPage = lazy(() => import('./pages/ReplayStudioPage'))
 const AgentStudioPage = lazy(() => import('./pages/AgentStudioPage'))
 const MediaStudioPage = lazy(() => import('./pages/MediaStudioPage'))
+const StoryboardStudioPage = lazy(() => import('./pages/StoryboardStudioPage'))
 const DashboardPage = lazy(() => import('./pages/DashboardPage'))
 
 export default function App() {
@@ -29,7 +30,9 @@ export default function App() {
             <Route path="model" element={<NarrativeModelPage />} />
             <Route path="replay" element={<ReplayStudioPage />} />
             <Route path="agents" element={<AgentStudioPage />} />
-            <Route path="media" element={<MediaStudioPage />} />
+            <Route path="media" element={<Navigate to="audio-book" replace />} />
+            <Route path="media/audio-book" element={<MediaStudioPage />} />
+            <Route path="media/storyboard" element={<StoryboardStudioPage />} />
           </Route>
 
           <Route path="/project/:projectId/chapter" element={<LegacyChapterRedirect />} />

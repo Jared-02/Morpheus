@@ -397,12 +397,314 @@ body {
 
 /* ===== Studio Shell ===== */
 
+.studio-shell-layout {
+  min-height: 100vh;
+  height: 100vh;
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  grid-template-rows: 60px minmax(0, 1fr);
+  background: transparent;
+}
+
+.studio-shell-layout__header {
+  grid-column: 1 / -1;
+  border-bottom: 1px solid var(--glass-border);
+  background: var(--glass);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+
+.studio-shell-layout__sidebar {
+  min-height: 0;
+  border-right: 1px solid var(--glass-border);
+  background: var(--glass);
+  overflow: hidden;
+}
+
+.studio-shell-layout__main {
+  min-height: 0;
+  overflow: hidden;
+}
+
 .studio-shell__main {
-  min-height: calc(100vh - 76px);
+  height: 100%;
+  overflow: auto;
+}
+
+.studio-topnav__brand-wrap {
+  min-width: 0;
+}
+
+.studio-topnav__logo {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-primary);
+}
+
+.studio-topnav__logo-svg {
+  width: 24px;
+  height: 24px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+}
+
+.studio-topnav__brand-title {
+  white-space: nowrap;
+}
+
+.studio-topnav__brand-subtitle {
+  padding-left: 12px;
+  margin-left: 4px;
+  border-left: 1px solid var(--glass-border);
+  white-space: nowrap;
+  font-size: 1.02rem;
+}
+
+.studio-topnav__project-name {
+  max-width: min(460px, 34vw);
+  text-align: center;
+  letter-spacing: -0.02em;
+  font-size: 1.36rem;
+  line-height: 1.1;
+}
+
+.studio-topnav__actions {
+  flex-shrink: 0;
+}
+
+.studio-topnav__avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  border: 1px solid var(--glass-border);
+  background: var(--surface-soft);
+  color: var(--text-primary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.studio-topnav__avatar span {
+  font-size: 0.92rem;
+}
+
+.studio-shell__sidebar-inner {
+  height: 100%;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 12px;
+  padding: 10px;
+}
+
+.studio-shell__sidebar-scroll {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.studio-shell__directory {
+  height: 100%;
+  overflow-y: auto;
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  padding-right: 2px;
+}
+
+.studio-shell__directory-block {
+  display: grid;
+  gap: 4px;
+}
+
+.studio-shell__directory-link {
+  text-decoration: none;
+  color: var(--text-secondary);
+  border: 1px solid transparent;
+  border-radius: 12px;
+  padding: 11px 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 1.02rem;
+  font-weight: 700;
+  transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease;
+}
+
+.studio-shell__directory-link:hover {
+  border-color: var(--glass-border);
+  background: color-mix(in srgb, var(--surface-soft) 88%, transparent 12%);
+}
+
+.studio-shell__directory-link.is-active {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 34%, transparent 66%);
+  background: color-mix(in srgb, var(--accent) 14%, transparent 86%);
+}
+
+.studio-shell__directory-icon {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.studio-shell__directory-icon svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.studio-shell__directory-text {
+  min-width: 0;
+  flex: 1;
+}
+
+.studio-shell__directory-caret {
+  color: var(--text-tertiary);
+  font-size: 0.78rem;
+}
+
+.studio-shell__directory-children {
+  display: grid;
+  gap: 4px;
+  padding-left: 26px;
+}
+
+.studio-shell__directory-child {
+  text-decoration: none;
+  color: var(--text-secondary);
+  border: 1px solid transparent;
+  border-radius: 10px;
+  padding: 9px 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.studio-shell__directory-child:hover {
+  border-color: var(--glass-border);
+  background: color-mix(in srgb, var(--surface-soft) 88%, transparent 12%);
+}
+
+.studio-shell__directory-child.is-active {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 34%, transparent 66%);
+  background: color-mix(in srgb, var(--accent) 14%, transparent 86%);
+}
+
+.studio-shell__project-switch-card {
+  border: 1px solid var(--glass-border);
+  border-radius: 14px;
+  background: var(--surface-card);
+  padding: 10px;
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr);
+  gap: 10px;
+}
+
+.studio-shell__project-cover {
+  width: 54px;
+  height: 54px;
+  border-radius: 10px;
+  background: linear-gradient(145deg, #14315f, #402763 48%, #0f4660 86%);
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent 82%);
+}
+
+.studio-shell__project-meta {
+  min-width: 0;
+}
+
+.studio-shell__project-meta strong {
+  display: block;
+  margin: 0;
+  font-size: 0.96rem;
+  font-weight: 800;
+  color: var(--text-primary);
+  line-height: 1.2;
+}
+
+.studio-shell__project-meta p {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.studio-shell__switch-project-btn {
+  grid-column: 1 / -1;
+  text-decoration: none;
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-primary);
+  font-weight: 700;
+  background: color-mix(in srgb, var(--surface-soft) 88%, transparent 12%);
+  transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease;
+}
+
+.studio-shell__switch-project-btn:hover {
+  border-color: color-mix(in srgb, var(--accent) 34%, transparent 66%);
+  color: var(--accent);
+}
+
+.studio-shell__mobile-links {
+  display: grid;
+  gap: 6px;
+}
+
+.studio-shell__mobile-link {
+  text-decoration: none;
+  color: var(--text-secondary);
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
+.studio-shell__mobile-link.is-active {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 34%, transparent 66%);
+}
+
+.studio-shell__mobile-link.is-child {
+  margin-left: 10px;
+}
+
+@media (max-width: 1024px) {
+  .studio-topnav__project-name {
+    font-size: 1.16rem;
+  }
+}
+
+@media (max-width: 768px) {
+  .studio-shell-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .studio-shell-layout__sidebar {
+    display: none;
+  }
 }
 
 .workspace-frame {
-  min-height: calc(100vh - 76px);
+  min-height: calc(100vh - 66px);
   padding: 24px;
   display: flex;
   flex-direction: column;
@@ -796,7 +1098,7 @@ pre {
   margin: 0;
 }
 
-/* ── Agent Progress Bar ── */
+/* 閳光偓閳光偓 Agent Progress Bar 閳光偓閳光偓 */
 
 .agent-progress {
   display: grid;
@@ -1529,7 +1831,7 @@ pre {
   resize: none;
 }
 
-/* ── ChapterTOC ── */
+/* 閳光偓閳光偓 ChapterTOC 閳光偓閳光偓 */
 
 .writing-toc {
   border: 1px solid var(--glass-border);
@@ -1611,7 +1913,7 @@ pre {
   white-space: nowrap;
 }
 
-/* ── Writing Stats ── */
+/* 閳光偓閳光偓 Writing Stats 閳光偓閳光偓 */
 
 .writing-stats {
   display: grid;
@@ -1642,7 +1944,7 @@ pre {
   color: var(--text-primary);
 }
 
-/* ── Writing Logs ── */
+/* 閳光偓閳光偓 Writing Logs 閳光偓閳光偓 */
 
 .writing-logs {
   border: 1px solid var(--glass-border);
@@ -1673,7 +1975,7 @@ pre {
   line-height: 1.7;
 }
 
-/* ── Pulse Indicator ── */
+/* 閳光偓閳光偓 Pulse Indicator 閳光偓閳光偓 */
 
 @keyframes pulse-dot {
 
@@ -1714,7 +2016,7 @@ pre {
   font-weight: 500;
 }
 
-/* ── ChapterExportMenu ── */
+/* 閳光偓閳光偓 ChapterExportMenu 閳光偓閳光偓 */
 
 .export-menu {
   position: relative;
@@ -3113,7 +3415,7 @@ tbody tr:hover {
   line-height: 1.8;
 }
 
-/* ===== Focus Ring – Keyboard Navigation (Requirements 14.1-14.4) ===== */
+/* ===== Focus Ring 閳?Keyboard Navigation (Requirements 14.1-14.4) ===== */
 
 :focus-visible {
   outline: 1px solid var(--accent);
@@ -3688,7 +3990,7 @@ tbody tr:hover {
   font-size: 0.86rem;
 }
 
-/* ── Stats Bar ── */
+/* 閳光偓閳光偓 Stats Bar 閳光偓閳光偓 */
 
 .mb-stats-bar {
   display: flex;
@@ -3722,7 +4024,7 @@ tbody tr:hover {
   font-weight: 600;
 }
 
-/* ── Two-column Browse Grid ── */
+/* 閳光偓閳光偓 Two-column Browse Grid 閳光偓閳光偓 */
 
 .mb-browse-grid {
   display: grid;
@@ -3749,7 +4051,7 @@ tbody tr:hover {
   backdrop-filter: blur(20px);
 }
 
-/* ── Section Heads ── */
+/* 閳光偓閳光偓 Section Heads 閳光偓閳光偓 */
 
 .mb-section-head {
   display: flex;
@@ -3769,7 +4071,7 @@ tbody tr:hover {
   gap: 6px;
 }
 
-/* ── Search Panel ── */
+/* 閳光偓閳光偓 Search Panel 閳光偓閳光偓 */
 
 .mb-search-bar {
   display: flex;
@@ -3811,7 +4113,7 @@ tbody tr:hover {
   gap: 8px;
 }
 
-/* ── Result Card ── */
+/* 閳光偓閳光偓 Result Card 閳光偓閳光偓 */
 
 .mb-result-card {
   padding: 12px;
@@ -3870,7 +4172,7 @@ tbody tr:hover {
   line-height: 1.65;
 }
 
-/* ── Files Panel ── */
+/* 閳光偓閳光偓 Files Panel 閳光偓閳光偓 */
 
 .mb-layer-filters {
   display: flex;
@@ -3888,7 +4190,7 @@ tbody tr:hover {
   padding-right: 2px;
 }
 
-/* ── File Card ── */
+/* 閳光偓閳光偓 File Card 閳光偓閳光偓 */
 
 .mb-file-card {
   padding: 10px 12px;
@@ -3957,7 +4259,7 @@ tbody tr:hover {
   overflow: auto;
 }
 
-/* ── Layer Legend ── */
+/* 閳光偓閳光偓 Layer Legend 閳光偓閳光偓 */
 
 .mb-layer-legend {
   display: flex;
@@ -3981,7 +4283,7 @@ tbody tr:hover {
   color: var(--text-tertiary);
 }
 
-/* ── Identity Panel ── */
+/* 閳光偓閳光偓 Identity Panel 閳光偓閳光偓 */
 
 .mb-identity-panel {
   padding: 20px;

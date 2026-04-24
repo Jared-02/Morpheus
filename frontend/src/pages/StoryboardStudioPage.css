@@ -1,0 +1,130 @@
+.sb-page {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto 1fr 1fr;
+  gap: 12px;
+  padding: 12px;
+  overflow: hidden;
+}
+
+.sb-panel {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-card);
+  box-shadow: var(--shadow-sm);
+}
+
+.sb-header {
+  padding: 12px;
+}
+
+.sb-header h2 {
+  margin: 0;
+  font-size: 1.12rem;
+}
+
+.sb-header p {
+  margin: 8px 0 0;
+  color: var(--text-secondary);
+  font-size: 0.88rem;
+}
+
+.sb-board {
+  min-height: 0;
+  padding: 12px;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 10px;
+}
+
+.sb-board header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.sb-board h3,
+.sb-list h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.sb-board button {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 16%, transparent 84%);
+  color: var(--accent);
+  font-size: 0.84rem;
+  font-weight: 700;
+  font-family: inherit;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+
+.sb-canvas {
+  min-height: 0;
+  border: 1px dashed var(--border-strong);
+  border-radius: 10px;
+  background:
+    linear-gradient(to right, color-mix(in srgb, var(--border) 35%, transparent 65%) 1px, transparent 1px) 0 0 / 24px 24px,
+    linear-gradient(to bottom, color-mix(in srgb, var(--border) 35%, transparent 65%) 1px, transparent 1px) 0 0 / 24px 24px,
+    color-mix(in srgb, var(--surface-soft) 82%, transparent 18%);
+  display: grid;
+  place-items: center;
+}
+
+.sb-canvas__guide {
+  color: var(--text-tertiary);
+  font-size: 0.92rem;
+}
+
+.sb-list {
+  min-height: 0;
+  padding: 12px;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 10px;
+}
+
+.sb-table {
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.sb-table__head,
+.sb-table__row {
+  display: grid;
+  grid-template-columns: 52px minmax(260px, 1fr) 160px 90px 70px;
+  gap: 8px;
+  align-items: center;
+  padding: 10px;
+}
+
+.sb-table__head {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--surface-soft) 88%, transparent 12%);
+}
+
+.sb-table__row {
+  border-top: 1px solid var(--border);
+  font-size: 0.88rem;
+}
+
+@media (max-width: 1080px) {
+  .sb-page {
+    height: auto;
+    min-height: 100%;
+    grid-template-rows: auto auto auto;
+    overflow: visible;
+  }
+
+  .sb-board,
+  .sb-list {
+    min-height: 320px;
+  }
+}
